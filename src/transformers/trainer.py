@@ -1139,7 +1139,7 @@ class Trainer:
         if self.args.past_index >= 0:
             self._past = outputs[self.args.past_index]
         # We don't use .loss here since the model may return tuples instead of ModelOutput.
-        return outputs[0]
+        return outputs[0] + outputs[1]
 
     def is_local_master(self) -> bool:
         """
