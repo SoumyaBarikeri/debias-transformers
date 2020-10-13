@@ -76,6 +76,10 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
+    force_pad_token: bool = field(
+        default=False,
+        metadata={"help": "Whether to force the addition of a padding token to tokenizer that does not already have one."},
+    )
 
 
 @dataclass
@@ -221,6 +225,9 @@ def main():
     else:
         logger.info("Training new model from scratch")
         model = AutoModelWithLMHead.from_config(config)
+
+    special_tokens_dict = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>'}
+    num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
 
     model.resize_token_embeddings(len(tokenizer))
 
