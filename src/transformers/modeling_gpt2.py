@@ -1101,7 +1101,7 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
 
         for target_ids in target_ids_list:
 
-            target_embeds = all_input_embeds(torch.LongTensor(target_ids))
+            target_embeds = all_input_embeds(target_ids)
             # print(target_embeds)
             debias_logits = self.debias_head(hidden_states, weight=target_embeds)
             # print('debias_logits {}'.format(debias_logits))
