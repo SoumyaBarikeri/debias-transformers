@@ -1056,7 +1056,7 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
         # all_input_embeds = self.get_output_embeddings()
         # [[Ġjew, ĠChristian], [ĠJews, ĠChristians], [ĠJudaism, ĠChristianity], [ĠJewish, ĠChristian],
         # [Jew, Christian]]
-        target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+        target_ids_list = torch.LongTensor([[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]])
         # [[ĠMuslims, ĠChristians], [Muslims, ĠChristians], [Muslim, Christian], [ĠMuslim, ĠChristian],
         # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
         # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
