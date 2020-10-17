@@ -1112,8 +1112,12 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
 
             debias_softmax = torch.squeeze(debias_softmax)
            
-            debias_softmax_1 = torch.flatten(debias_softmax[:, :, 0])
-            debias_softmax_2 = torch.flatten(debias_softmax[:, :, 1])
+            if len(list(debias_softmax.shape)) == 3:
+                debias_softmax_1 = torch.flatten(debias_softmax[:,:, 0])
+                debias_softmax_2 = torch.flatten(debias_softmax[:,:, 1])
+            elif len(list(debias_softmax.shape)) == 2:
+                debias_softmax_1 = torch.flatten(debias_softmax[:, 0])
+                debias_softmax_2 = torch.flatten(debias_softmax[:, 1])
 
             debias_loss = torch.abs(torch.log(debias_softmax_1/debias_softmax_2))
 
