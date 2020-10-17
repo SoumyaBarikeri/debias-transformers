@@ -1065,6 +1065,7 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
         print(self.device)
         all_input_embeds = all_input_embeds.to(self.device)
         target_ids_list = target_ids_list.to(self.device)
+        debias_loss_total = debias_loss_total.to(self.device)
 
         '''
         for i, input_id in enumerate(input_ids):
