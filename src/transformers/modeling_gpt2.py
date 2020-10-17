@@ -1062,6 +1062,9 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
         # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
         #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
         debias_loss_total = 0
+        print(self.device)
+        all_input_embeds = all_input_embeds.to(self.device)
+        target_ids_list = target_ids_list.to(self.device)
 
         '''
         for i, input_id in enumerate(input_ids):
