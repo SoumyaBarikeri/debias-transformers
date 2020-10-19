@@ -126,7 +126,7 @@ from .modeling_funnel import (
     FunnelForTokenClassification,
     FunnelModel,
 )
-from .modeling_gpt2 import GPT2LMHeadModel, GPT2Model, GPT2DoubleHeadsModelCustomLoss
+from .modeling_gpt2 import GPT2LMHeadModel, GPT2Model, GPT2DoubleHeadsModelCustomLoss, GPT2DoubleHeadsModelProjectionLoss
 from .modeling_layoutlm import LayoutLMForMaskedLM, LayoutLMForTokenClassification, LayoutLMModel
 from .modeling_longformer import (
     LongformerForMaskedLM,
@@ -278,7 +278,8 @@ MODEL_WITH_LM_HEAD_MAPPING = OrderedDict(
         (BertConfig, BertForMaskedLM),
         (OpenAIGPTConfig, OpenAIGPTLMHeadModel),
 #         (GPT2Config, GPT2LMHeadModel),
-        (GPT2Config, GPT2DoubleHeadsModelCustomLoss),
+#         (GPT2Config, GPT2DoubleHeadsModelCustomLoss),
+        (GPT2Config, GPT2DoubleHeadsModelProjectionLoss),
         (MobileBertConfig, MobileBertForMaskedLM),
         (TransfoXLConfig, TransfoXLLMHeadModel),
         (XLNetConfig, XLNetLMHeadModel),
