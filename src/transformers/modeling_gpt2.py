@@ -1331,10 +1331,10 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
         # print(v.shape)
 
         v_k = v[:, :3]
-        # print(v_k.shape)
+        print(v_k.shape)
 
         n = lm_head_weights[attribute_list]
-        # print('n shape {}'.format(n.shape))
+        print('n shape {}'.format(n.shape))
         # print('neutral words weight {}'.format(n[0]))
         nv = torch.matmul(n, v_k)
         print('nv shape {}'.format(nv.shape))
