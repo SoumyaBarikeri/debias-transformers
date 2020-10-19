@@ -1338,7 +1338,7 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
         print('n shape {}'.format(n.shape))
         # print('neutral words weight {}'.format(n[0]))
 #         nv = torch.matmul(n, v_k)
-        nv = self.projection(n, weight=v_k)
+        nv = self.projection(n.view(-1, n.size(-1)), weight=v_k.view(-1, v_k.size(0)))
         print('nv shape {}'.format(nv.shape))
         print(nv)
         bias_loss = torch.square(torch.norm(nv))
