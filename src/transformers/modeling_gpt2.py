@@ -1067,7 +1067,7 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
         target_ids_list = target_ids_list.to(self.device)
 #         debias_loss_total = debias_loss_total.to(self.device)
 
-        '''
+       
         for i, input_id in enumerate(input_ids):
             for target_ids in target_ids_list:
                 for t_id in target_ids:
@@ -1095,10 +1095,10 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
 
                         debias_loss_total = debias_loss_total + debias_loss
 
-        debias_loss_total = debias_loss_total / 4
+        debias_loss_total = debias_loss_total / len(target_ids_list)
 
+        
         '''
-
         for target_ids in target_ids_list:
 
             target_embeds = all_input_embeds(target_ids)
@@ -1129,7 +1129,8 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
 
         debias_loss_total = debias_loss_total / (len(target_ids_list) * hidden_states.shape[1])
         # print('debias_loss_total {}'.format(debias_loss_total))
-
+        '''
+        
         '''
         # attribute_list = [31828, 18536, 10461, 23542, 6181, 25513, 50186, 18536, 14918, 15773, 39835, 10489, 17118,
         #                   18204, 47620, 6272, 47859, 41520, 7812]
@@ -1178,7 +1179,7 @@ class GPT2DoubleHeadsModelCustomLoss(GPT2PreTrainedModel):
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         # lm_loss = lm_loss + debias_loss_total
-        print('total debias_loss {}'.format(debias_loss_total))
+        print('total per sent debias_loss {}'.format(debias_loss_total))
         print('lm loss {}'.format(lm_loss))
 
         if not return_dict:
