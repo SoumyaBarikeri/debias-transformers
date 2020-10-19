@@ -1302,9 +1302,9 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
         lm_logits = self.lm_head(hidden_states)
         # cls_logits = self.cls_head(hidden_states[:,-1])
 
-        attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859, 29349,
-                          39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
-        target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+        attribute_list = torch.LongTensor([8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859, 29349,
+                          39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279])
+        target_ids_list = torch.LongTensor([[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]])
 
         lm_head_weights = self.lm_head.weight.data
         # print('lm_head_weight_shape {}'.format(lm_head_weights.shape))
