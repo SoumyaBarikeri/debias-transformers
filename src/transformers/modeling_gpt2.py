@@ -1350,7 +1350,7 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
 
         # lm_loss = lm_loss + debias_loss_total
 #         print('proj bias_loss {}'.format(bias_loss))
-        print('lm loss {}'.format(lm_loss))
+#         print('lm loss {}'.format(lm_loss))
 
         if not return_dict:
             output = (lm_logits,) + transformer_outputs[1:]
