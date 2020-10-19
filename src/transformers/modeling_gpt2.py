@@ -1315,6 +1315,8 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
         attribute_list = attribute_list.to(self.device)
         
         diff_matrix = torch.zeros((5, 768))
+        bias_loss = 0
+        
         for i, target_pair in enumerate(target_ids_list):
             j_w = lm_head_weights[target_pair[0]]
             c_w = lm_head_weights[target_pair[1]]
