@@ -1339,7 +1339,7 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
         nv = torch.matmul(n, v_k)
         print('nv shape {}'.format(nv.shape))
         bias_loss = torch.square(torch.norm(nv))
-        print(bias_loss)
+#         print(bias_loss)
 
         lm_loss = None
         if labels is not None:
@@ -1349,7 +1349,7 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         # lm_loss = lm_loss + debias_loss_total
-        print('proj bias_loss {}'.format(bias_loss))
+#         print('proj bias_loss {}'.format(bias_loss))
         print('lm loss {}'.format(lm_loss))
 
         if not return_dict:
