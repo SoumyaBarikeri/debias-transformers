@@ -1376,3 +1376,847 @@ class GPT2DoubleHeadsModelProjectionLoss(GPT2PreTrainedModel):
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
         )
+
+class SequenceClassifier(nn.Module):
+    def __init__(
+            self,
+            hidden_size: int,
+            num_classes: int,
+    ):
+        super(SequenceClassifier, self).__init__()
+        self.fc1 = nn.Linear(hidden_size, num_classes)
+
+    def forward(self, hidden_states):
+        cls_logits = self.fc1(hidden_states)  # (batch_size , max_len, num_classes)
+        return cls_logits
+
+
+class SequenceClassificationHead(nn.Module):
+    """Head for sentence-level classification tasks."""
+
+    def __init__(self, config):
+        super().__init__()
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.dropout = nn.Dropout(0.2)
+        self.out_proj = nn.Linear(config.hidden_size, 1)
+
+    def forward(self, features, **kwargs):
+        x = features  # take <s> token (equiv. to [CLS])
+        x = self.dropout(x)
+        x = self.dense(x)
+        x = torch.tanh(x)
+        x = self.dropout(x)
+        x = self.out_proj(x)
+        return x
+
+
+class GPT2DoubleHeadsModelCustomClassifier(GPT2PreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        config.num_labels = 1
+        self.transformer = GPT2Model(config)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # self.cls_head = SequenceClassifier(hidden_size=768, num_classes=1)
+        self.cls_head = SequenceClassificationHead(config)
+
+        self.init_weights()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # only last token for inputs_ids if past is defined in kwargs
+        if past:
+            input_ids = input_ids[:, -1].unsqueeze(-1)
+
+        return {
+            "input_ids": input_ids,
+            "past_key_values": past,
+            "use_cache": kwargs.get("use_cache"),
+        }
+
+    # @add_start_docstrings_to_callable(GPT2_INPUTS_DOCSTRING)
+    # @replace_return_docstrings(output_type=GPT2DoubleHeadsModelOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+            self,
+            input_ids=None,
+            past_key_values=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            mc_token_ids=None,
+            labels=None,
+            mc_labels=None,
+            use_cache=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+            **kwargs,
+    ):
+        r"""
+            mc_token_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_choices)`, `optional`, default to index of the last token of the input)
+                Index of the classification token in each input sequence.
+                Selected in the range ``[0, input_ids.size(-1) - 1[``.
+            labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`)
+                Labels for language modeling.
+                Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
+                Indices are selected in ``[-1, 0, ..., config.vocab_size]``
+                All labels set to ``-100`` are ignored (masked), the loss is only
+                computed for labels in ``[0, ..., config.vocab_size]``
+            mc_labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size)`, `optional`, defaults to :obj:`None`)
+                Labels for computing the multiple choice classification loss.
+                Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
+                of the input tensors. (see `input_ids` above)
+            kwargs (:obj:`Dict[str, any]`, optional, defaults to `{}`):
+                Used to hide legacy arguments that have been deprecated.
+
+        """
+        if "lm_labels" in kwargs:
+            warnings.warn(
+                "The `lm_labels` argument is deprecated and will be removed in a future version, use `labels` instead.",
+                FutureWarning,
+            )
+            labels = kwargs.pop("lm_labels")
+        if "past" in kwargs:
+            warnings.warn(
+                "The `past` argument is deprecated and will be removed in a future version, use `past_key_values` instead.",
+                FutureWarning,
+            )
+            past_key_values = kwargs.pop("past")
+        assert kwargs == {}, f"Unexpected keyword arguments: {list(kwargs.keys())}."
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        # print('input_ids: {}'.format(input_ids))
+
+        hidden_states = transformer_outputs[0]
+        # print('hidden_states shape: {}'.format(hidden_states.shape))
+        # print('hidden_states: {}'.format(hidden_states))
+        # print('hidden states last {}'.format(hidden_states[:,-1]))
+
+        lm_logits = self.lm_head(hidden_states)
+        # cls_logits = self.cls_head(hidden_states[:,-1])
+        cls_logits = self.cls_head(hidden_states[:,-1,:])
+
+        lm_head_weights = self.lm_head.weight.data
+        print('lm_head_weight_shape {}'.format(lm_head_weights.shape))
+        print('first word weight {}'.format(lm_head_weights[0]))
+        # print('cls_logits {}'.format(cls_logits))
+        # print('mc_labels {}'.format(mc_labels))
+
+        sig = nn.Sigmoid()
+        cls_prob = sig(cls_logits)
+        # print('cls_prob {}'.format(cls_prob))
+        bias_loss = torch.sum(cls_prob)
+        # print('bias_loss {}'.format(bias_loss))
+
+        cls_loss = None
+        if mc_labels is not None:
+            cls_labels = mc_labels
+            # print(cls_logits.view(cls_logits.size(0)))
+            # print(cls_labels.view(cls_labels.size(0)))
+            cls_labels = cls_labels.view(cls_labels.size(0))
+            cls_labels = cls_labels.type(torch.DoubleTensor)
+
+            loss_fct = BCEWithLogitsLoss()
+            cls_loss = loss_fct(cls_logits.view(cls_logits.size(0)), cls_labels)
+
+        lm_loss = None
+        if labels is not None:
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss_fct = CrossEntropyLoss()
+            lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        # lm_loss = lm_loss + debias_loss_total
+        print('total cls_loss {}'.format(cls_loss))
+        print('lm loss {}'.format(lm_loss))
+
+        if not return_dict:
+            output = (lm_logits, cls_logits) + transformer_outputs[1:]
+            if cls_loss is not None:
+                output = (cls_loss, bias_loss) + output
+            return ((lm_loss,) + output) if lm_loss is not None else output
+
+        # print('LM loss, Debias loss')
+        # print(output[0], output[1])
+        mc_loss = None
+        mc_logits = None
+        return GPT2DoubleHeadsModelOutput(
+            loss=lm_loss,
+            mc_loss=mc_loss,
+            logits=lm_logits,
+            mc_logits=mc_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+        )
+
+
+class GPT2DoubleHeadsModelSoftDebiasing(GPT2PreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        config.num_labels = 1
+        self.transformer = GPT2Model(config)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.projection = nn.functional.linear
+
+        self.init_weights()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # only last token for inputs_ids if past is defined in kwargs
+        if past:
+            input_ids = input_ids[:, -1].unsqueeze(-1)
+
+        return {
+            "input_ids": input_ids,
+            "past_key_values": past,
+            "use_cache": kwargs.get("use_cache"),
+        }
+
+    # @add_start_docstrings_to_callable(GPT2_INPUTS_DOCSTRING)
+    # @replace_return_docstrings(output_type=GPT2DoubleHeadsModelOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+            self,
+            input_ids=None,
+            past_key_values=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            mc_token_ids=None,
+            labels=None,
+            mc_labels=None,
+            use_cache=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+            **kwargs,
+    ):
+        r"""
+            mc_token_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_choices)`, `optional`, default to index of the last token of the input)
+                Index of the classification token in each input sequence.
+                Selected in the range ``[0, input_ids.size(-1) - 1[``.
+            labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`)
+                Labels for language modeling.
+                Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
+                Indices are selected in ``[-1, 0, ..., config.vocab_size]``
+                All labels set to ``-100`` are ignored (masked), the loss is only
+                computed for labels in ``[0, ..., config.vocab_size]``
+            mc_labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size)`, `optional`, defaults to :obj:`None`)
+                Labels for computing the multiple choice classification loss.
+                Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
+                of the input tensors. (see `input_ids` above)
+            kwargs (:obj:`Dict[str, any]`, optional, defaults to `{}`):
+                Used to hide legacy arguments that have been deprecated.
+
+        """
+        if "lm_labels" in kwargs:
+            warnings.warn(
+                "The `lm_labels` argument is deprecated and will be removed in a future version, use `labels` instead.",
+                FutureWarning,
+            )
+            labels = kwargs.pop("lm_labels")
+        if "past" in kwargs:
+            warnings.warn(
+                "The `past` argument is deprecated and will be removed in a future version, use `past_key_values` instead.",
+                FutureWarning,
+            )
+            past_key_values = kwargs.pop("past")
+        assert kwargs == {}, f"Unexpected keyword arguments: {list(kwargs.keys())}."
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        # print('input_ids: {}'.format(input_ids))
+
+        hidden_states = transformer_outputs[0]
+        # print('hidden_states shape: {}'.format(hidden_states.shape))
+        # print('hidden_states: {}'.format(hidden_states))
+        # print('hidden states last {}'.format(hidden_states[:,-1]))
+
+        lm_logits = self.lm_head(hidden_states)
+        # cls_logits = self.cls_head(hidden_states[:,-1])
+
+        attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859, 29349,
+                          39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
+        target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+
+        lm_head_weights = self.lm_head.weight.data
+        # print('lm_head_weight_shape {}'.format(lm_head_weights.shape))
+        # print('first word weight {}'.format(lm_head_weights[0]))
+
+        diff_matrix = torch.zeros((5, 768))
+        for i, target_pair in enumerate(target_ids_list):
+            j_w = lm_head_weights[target_pair[0]]
+            c_w = lm_head_weights[target_pair[1]]
+            diff_w = (c_w - j_w)/2
+            diff_matrix[i] = diff_w
+
+        # print('diff_matrix {}, shape {}'.format(diff_matrix, diff_matrix.shape))
+        u, s, v = torch.svd(diff_matrix)
+
+        # print(u.shape)
+        # print(s.shape)
+        # print(v.shape)
+
+        v_k = v[:, :3]
+        v_k = v
+        print(v_k.shape)
+
+        n = lm_head_weights[attribute_list]
+        # print('n shape {}'.format(n.shape))
+        # print('neutral words weight {}'.format(n[0]))
+        n = n.contiguous()
+        v_k = v_k.contiguous()
+        nv = self.projection(n.view(-1, n.size(-1)), weight=v_k.view(-1, v_k.size(-2)))
+        # nv = torch.matmul(n, v_k)
+        # print('nv shape {}'.format(nv.shape))
+        bias_loss = torch.square(torch.norm(nv))
+
+        lm_loss = None
+        if labels is not None:
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss_fct = CrossEntropyLoss()
+            lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        # lm_loss = lm_loss + debias_loss_total
+        print('proj bias_loss {}'.format(bias_loss))
+        print('lm loss {}'.format(lm_loss))
+
+        if not return_dict:
+            output = (lm_logits,) + transformer_outputs[1:]
+            output = (bias_loss,) + output
+            # print(((lm_loss,) + output))
+            return ((lm_loss,) + output) if lm_loss is not None else output
+
+        # print('LM loss, Debias loss')
+        # print(output[0], output[1])
+        mc_loss = None
+        mc_logits = None
+        return GPT2DoubleHeadsModelOutput(
+            loss=lm_loss,
+            mc_loss=mc_loss,
+            logits=lm_logits,
+            mc_logits=mc_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+        )
+
+
+class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        config.num_labels = 1
+        self.transformer = GPT2Model(config)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
+        self.init_weights()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # only last token for inputs_ids if past is defined in kwargs
+        if past:
+            input_ids = input_ids[:, -1].unsqueeze(-1)
+
+        return {
+            "input_ids": input_ids,
+            "past_key_values": past,
+            "use_cache": kwargs.get("use_cache"),
+        }
+
+    # @add_start_docstrings_to_callable(GPT2_INPUTS_DOCSTRING)
+    # @replace_return_docstrings(output_type=GPT2DoubleHeadsModelOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+            self,
+            input_ids=None,
+            past_key_values=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            mc_token_ids=None,
+            labels=None,
+            mc_labels=None,
+            use_cache=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+            **kwargs,
+    ):
+        r"""
+            mc_token_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_choices)`, `optional`, default to index of the last token of the input)
+                Index of the classification token in each input sequence.
+                Selected in the range ``[0, input_ids.size(-1) - 1[``.
+            labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`)
+                Labels for language modeling.
+                Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
+                Indices are selected in ``[-1, 0, ..., config.vocab_size]``
+                All labels set to ``-100`` are ignored (masked), the loss is only
+                computed for labels in ``[0, ..., config.vocab_size]``
+            mc_labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size)`, `optional`, defaults to :obj:`None`)
+                Labels for computing the multiple choice classification loss.
+                Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
+                of the input tensors. (see `input_ids` above)
+            kwargs (:obj:`Dict[str, any]`, optional, defaults to `{}`):
+                Used to hide legacy arguments that have been deprecated.
+
+        """
+        if "lm_labels" in kwargs:
+            warnings.warn(
+                "The `lm_labels` argument is deprecated and will be removed in a future version, use `labels` instead.",
+                FutureWarning,
+            )
+            labels = kwargs.pop("lm_labels")
+        if "past" in kwargs:
+            warnings.warn(
+                "The `past` argument is deprecated and will be removed in a future version, use `past_key_values` instead.",
+                FutureWarning,
+            )
+            past_key_values = kwargs.pop("past")
+        assert kwargs == {}, f"Unexpected keyword arguments: {list(kwargs.keys())}."
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        # print('input_ids: {}'.format(input_ids))
+
+        hidden_states = transformer_outputs[0]
+        print('hidden_states shape: {}'.format(hidden_states.shape))
+        # print('hidden_states: {}'.format(hidden_states))
+        # print('hidden states last {}'.format(hidden_states[:,-1]))
+
+        attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859, 29349,
+                          39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
+        target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+
+        lm_head_weights = self.lm_head.weight.data
+        # print('lm_head_weight_shape {}'.format(lm_head_weights.shape))
+        # print('first word weight {}'.format(lm_head_weights[0]))
+
+        diff_matrix = torch.zeros((5, 768))
+        for i, target_pair in enumerate(target_ids_list):
+            j_w = lm_head_weights[target_pair[0]]
+            c_w = lm_head_weights[target_pair[1]]
+            diff_w = (c_w - j_w) / 2
+            diff_matrix[i] = diff_w
+
+        # print('diff_matrix {}, shape {}'.format(diff_matrix, diff_matrix.shape))
+        u, s, v = torch.svd(diff_matrix)
+
+        # print(u.shape)
+        # print(s.shape)
+        # print(v.shape)
+
+        v_k = v[:, :3]
+        # print(v_k.shape)
+
+        # neutralise hidden states of all words
+        '''
+        word_projection_total = torch.zeros([768])
+        for input in range(hidden_states.shape[0]):
+            print('sentence length {}'.format(hidden_states[input].shape[0]))
+            for word in range(hidden_states[input].shape[0]):
+                word_embedding = hidden_states[input, word]
+                # print('word_embedding {}'.format(word_embedding))
+                for b in range(v_k.shape[1]):
+                    word_projection = torch.dot(word_embedding, v_k[:, b]) * v_k[:, b]
+                    # print('word_projection shape {}'.format(word_projection.shape))
+                    word_projection_total += word_projection
+                hidden_states[input, word] = hidden_states[input, word] - word_projection_total
+        '''
+
+        # neutralise hidden states of attribute words
+        word_projection_total = torch.zeros([768])
+        for i_sent, input_id_1 in enumerate(input_ids):
+            for i, input_id in enumerate(input_id_1):
+                if input_id in attribute_list:
+                    print(input_id)
+                    word_embedding = hidden_states[i_sent, i]
+                    # print('word_embedding {}'.format(word_embedding))
+                    for b in range(v_k.shape[1]):
+                        word_projection = torch.dot(word_embedding, v_k[:, b]) * v_k[:, b]
+                        # print('word_projection shape {}'.format(word_projection.shape))
+                        word_projection_total += word_projection
+                    hidden_states[i_sent, i] = hidden_states[i_sent, i] - word_projection_total
+
+        lm_logits = self.lm_head(hidden_states)
+
+
+        lm_loss = None
+        if labels is not None:
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss_fct = CrossEntropyLoss()
+            lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        # lm_loss = lm_loss + debias_loss_total
+        print('lm loss {}'.format(lm_loss))
+
+        if not return_dict:
+            output = (lm_logits,) + transformer_outputs[1:]
+            # output = (bias_loss,) + output
+            # print(((lm_loss,) + output))
+            return ((lm_loss,) + output) if lm_loss is not None else output
+
+        # print('LM loss, Debias loss')
+        # print(output[0], output[1])
+        mc_loss = None
+        mc_logits = None
+        return GPT2DoubleHeadsModelOutput(
+            loss=lm_loss,
+            mc_loss=mc_loss,
+            logits=lm_logits,
+            mc_logits=mc_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+        )
+
+
+class GPT2DoubleHeadsModelReligion2EqLoss(GPT2PreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        config.num_labels = 1
+        self.transformer = GPT2Model(config)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.debias_head = nn.functional.linear
+
+        self.init_weights()
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # only last token for inputs_ids if past is defined in kwargs
+        if past:
+            input_ids = input_ids[:, -1].unsqueeze(-1)
+
+        return {
+            "input_ids": input_ids,
+            "past_key_values": past,
+            "use_cache": kwargs.get("use_cache"),
+        }
+
+    # @add_start_docstrings_to_callable(GPT2_INPUTS_DOCSTRING)
+    # @replace_return_docstrings(output_type=GPT2DoubleHeadsModelOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+        self,
+        input_ids=None,
+        past_key_values=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        mc_token_ids=None,
+        labels=None,
+        mc_labels=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        **kwargs,
+    ):
+        r"""
+            mc_token_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_choices)`, `optional`, default to index of the last token of the input)
+                Index of the classification token in each input sequence.
+                Selected in the range ``[0, input_ids.size(-1) - 1[``.
+            labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`)
+                Labels for language modeling.
+                Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
+                Indices are selected in ``[-1, 0, ..., config.vocab_size]``
+                All labels set to ``-100`` are ignored (masked), the loss is only
+                computed for labels in ``[0, ..., config.vocab_size]``
+            mc_labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size)`, `optional`, defaults to :obj:`None`)
+                Labels for computing the multiple choice classification loss.
+                Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
+                of the input tensors. (see `input_ids` above)
+            kwargs (:obj:`Dict[str, any]`, optional, defaults to `{}`):
+                Used to hide legacy arguments that have been deprecated.
+
+        """
+        if "lm_labels" in kwargs:
+            warnings.warn(
+                "The `lm_labels` argument is deprecated and will be removed in a future version, use `labels` instead.",
+                FutureWarning,
+            )
+            labels = kwargs.pop("lm_labels")
+        if "past" in kwargs:
+            warnings.warn(
+                "The `past` argument is deprecated and will be removed in a future version, use `past_key_values` instead.",
+                FutureWarning,
+            )
+            past_key_values = kwargs.pop("past")
+        assert kwargs == {}, f"Unexpected keyword arguments: {list(kwargs.keys())}."
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        # print('input_ids: {}'.format(input_ids))
+
+        hidden_states = transformer_outputs[0]
+        # print('hidden_states shape: {}'.format(hidden_states.shape))
+        # print('hidden_states: {}'.format(hidden_states))
+
+
+        lm_logits = self.lm_head(hidden_states)
+
+        # print('lm_logits {}'.format(lm_logits))
+
+        # all_input_embeds = self.transformer.get_input_embeddings() # uncomment incase of input embed
+        all_output_embeds = self.lm_head.weight.data
+
+        # all_input_embeds = self.get_output_embeddings()
+        # [[Ġjew, ĠChristian], [ĠJews, ĠChristians], [ĠJudaism, ĠChristianity], [ĠJewish, ĠChristian],
+        # [Jew, Christian]]
+        # [[Ġmus, lim], [Ġchrist, ian]],
+
+        # [[ĠMuslims, ĠChristians], [Muslims, ĠChristians], [Muslim, Christian], [ĠMuslim, ĠChristian],
+        # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
+        # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
+        #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
+        debias_loss_total = 0
+        target_ids_list = [[[1928, 2475], [33826, 666]], [[271, 2543], [33826, 666, 414]], [[318,  2543], [33826, 666, 414]],
+                           [[283, 8937], [45630, 504]], [[610,  8937], [45630, 504]]]
+
+        '''
+        for i, input_id in enumerate(input_ids):
+            for target_id_pair in target_ids_list:
+                for idx, t_id in enumerate(target_id_pair):
+                    if idx == 0:
+                        # print(input_id)
+                        if t_id[0] in input_id and t_id[1] in input_id:
+                            # print('t_id {}'.format(t_id))
+                            # print(target_id_pair[0])
+                            # print(target_id_pair[1])
+
+                            # target_embeds_group1 = all_input_embeds(torch.LongTensor(target_id_pair[0])) # uncomment for input embed
+                            # target_embeds_group2 = all_input_embeds(torch.LongTensor(target_id_pair[1]))
+                            target_embeds_group1 = all_output_embeds[target_id_pair[0]]
+                            target_embeds_group2 = all_output_embeds[target_id_pair[1]]
+                            # avg_embeds_group1 = (target_embeds_group1[0] + target_embeds_group1[1])/2
+                            # avg_embeds_group2 = (target_embeds_group2[0] + target_embeds_group2[1])/2
+                            # print(avg_embeds_group1)
+                            # print(avg_embeds_group2)
+                            # print(target_embeds_group1[-1])
+                            # print(target_embeds_group2[-1])
+
+                            # avg_embeds_group1 = torch.mean(target_embeds_group1, 0)
+                            # avg_embeds_group2 = torch.mean(target_embeds_group2, 0)
+                            avg_embeds_group1 = target_embeds_group1[-1]
+                            avg_embeds_group2 = target_embeds_group2[-1]
+
+                            # print(avg_embeds_group1)
+                            # print(avg_embeds_group2)
+
+                            target_embeds = torch.stack([avg_embeds_group1, avg_embeds_group2])
+
+                            # target_embeds = all_input_embeds[target_ids]
+                            # print(target_embeds)
+                            # print('hidden_states[i] {}'.format((hidden_states[i]).shape))
+                            debias_logits = self.debias_head(hidden_states[i], weight=target_embeds)
+                            # print('debias_logits {}'.format(debias_logits))
+
+                            softmax_layer = nn.Softmax(dim=1)
+                            debias_softmax = softmax_layer(debias_logits)
+                            # print('debias_softmax {}'.format(debias_softmax))
+
+                            debias_softmax = torch.squeeze(debias_softmax)
+
+                            debias_softmax_1 = torch.flatten(debias_softmax[:, 0])
+                            debias_softmax_2 = torch.flatten(debias_softmax[:, 1])
+                            # print(debias_softmax_1)
+                            # print(debias_softmax_2)
+
+                            debias_loss = torch.abs(torch.log(debias_softmax_1 / debias_softmax_2))
+
+                            # debias_loss[torch.isnan(debias_loss)] = 0
+                            debias_loss = torch.sum(debias_loss)
+                            # print('debias_loss {}'.format(debias_loss))
+
+                            debias_loss_total = debias_loss_total + debias_loss
+
+        debias_loss_total = debias_loss_total / (len(target_ids_list) * hidden_states.shape[1])
+        '''
+
+        # print('hidden_states shape {}'.format(hidden_states.shape[1]))
+        for target_pair in target_ids_list:
+
+            # target_embeds_group1 = all_input_embeds(torch.LongTensor(target_pair[0]))
+            target_embeds_group1 = all_output_embeds[target_pair[0]]
+
+            # target_embeds_group2 = all_input_embeds(torch.LongTensor(target_pair[1]))
+            target_embeds_group2 = all_output_embeds[target_pair[1]]
+
+            # avg_embeds_group1 = (target_embeds_group1[0] + target_embeds_group1[1]) / 2
+            # avg_embeds_group2 = (target_embeds_group2[0] + target_embeds_group2[1]) / 2
+
+            # avg_embeds_group1 = torch.mean(target_embeds_group1, 0)
+            # avg_embeds_group2 = torch.mean(target_embeds_group2, 0)
+
+            avg_embeds_group1 = target_embeds_group1[-1]
+            avg_embeds_group2 = target_embeds_group2[-1]
+
+            target_embeds = torch.stack([avg_embeds_group1, avg_embeds_group2])
+            # print('target_embeds shape {}'.format(target_embeds.shape))
+
+
+            
+            # prob_group1_1 = self.debias_head(hidden_states.view(-1, hidden_states.size(-2), hidden_states.size(-1)),
+            #                                  weight=target_embeds_group1[0].view(-1, target_embeds_group1[0].size(-1)))
+            # prob_group1_2 = self.debias_head(hidden_states.view(-1, hidden_states.size(-2), hidden_states.size(-1)),
+            #                                  weight=target_embeds_group1[1].view(-1, target_embeds_group1[1].size(-1)))
+            # prob_group1 = prob_group1_1 * prob_group1_2
+            # 
+            # print('prob_group1 {}'.format(prob_group1))
+            # 
+            # prob_group2_1 = self.debias_head(hidden_states.view(-1, hidden_states.size(-2), hidden_states.size(-1)),
+            #                                  weight=target_embeds_group2[0].view(-1, target_embeds_group2[0].size(-1)))
+            # prob_group2_2 = self.debias_head(hidden_states.view(-1, hidden_states.size(-2), hidden_states.size(-1)),
+            #                                  weight=target_embeds_group2[1].view(-1, target_embeds_group2[1].size(-1)))
+            # prob_group2 = prob_group2_1 * prob_group2_2
+            # 
+            # print('prob_group2 {}'.format(prob_group2))
+            # 
+            # print('hidden_states shape {}'.format(hidden_states.shape))
+            # 
+            # # prob_group1 = prob_group1.squeeze()
+            # # prob_group2 = prob_group2.squeeze()
+            # # print('prob1 squeeze {}'.format(prob_group1))
+            # # print('prob2 squeeze {}'.format(prob_group2))
+            # 
+            # debias_logits = torch.cat((prob_group1, prob_group2), 2)
+            # print('logits {}'.format(logits))
+            
+            debias_logits = self.debias_head(hidden_states, weight=target_embeds)
+
+            softmax_layer = nn.Softmax(dim=2)
+            debias_softmax = softmax_layer(debias_logits)
+            # print('debias_softmax {}'.format(debias_softmax))
+
+            # debias_softmax = torch.squeeze(debias_softmax)
+            # print('after squeeze debias_softmax {}'.format(debias_softmax))
+
+            if len(list(debias_softmax.shape)) == 3:
+                debias_softmax_1 = torch.flatten(debias_softmax[:,:, 0])
+                debias_softmax_2 = torch.flatten(debias_softmax[:,:, 1])
+            elif len(list(debias_softmax.shape)) == 2:
+                debias_softmax_1 = torch.flatten(debias_softmax[:, 0])
+                debias_softmax_2 = torch.flatten(debias_softmax[:, 1])
+            # print('debias_softmax_1 {}'.format(debias_softmax_1))
+            # print('debias_softmax_2 {}'.format(debias_softmax_2))
+
+            log_eq = torch.log(debias_softmax_1/debias_softmax_2)
+            # print('log_eq {}'.format(log_eq))
+
+            debias_loss = torch.abs(torch.log(debias_softmax_1/debias_softmax_2))
+            # print('abs db loss {}'.format(debias_loss))
+
+            # debias_loss[torch.isnan(debias_loss)] = 0
+            debias_loss = torch.sum(debias_loss)
+
+            debias_loss_total = debias_loss_total + debias_loss
+            logger.info('debias_loss {}'.format(debias_loss))
+
+        debias_loss_total = debias_loss_total / (len(target_ids_list) * hidden_states.shape[1])
+
+
+        # print('debias_loss_total {}'.format(debias_loss_total))
+
+        # attribute_list_relg2 = [7417, 42002, 10509, 33184, 2372, 19971, 4923, 10309, 1368, 3434, 26127, 38313, 34082, 17162,
+        #                   12954, 4301, 4472, 5775, 1175, 20440, 20674, 7702, 42325, 5465, 5527, 16931, 43115, 38466,
+        #                   38007, 13384, 14273, 48492, 25765, 41932, 42301, 36108, 35052, 33908, 3685, 6590, 12524, 26592]
+        # left out attributes muslim - hijackers, lazy sheik, oil sheik, viel, vielded, deport, detain, thieves, charlatan,
+        # power-hungry, beard*, "wealthy oilmen", "harem maiden*", "suicide bomb*", headscarves
+
+
+        lm_loss = None
+        if labels is not None:
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss_fct = CrossEntropyLoss()
+            lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+        # lm_loss = lm_loss + debias_loss_total
+        print('eq debias_loss {}'.format(debias_loss_total))
+        print('lm loss {}'.format(lm_loss))
+
+        if not return_dict:
+            output = (lm_logits,) + transformer_outputs[1:]
+            # if debias_loss_total is not None:
+            output = (debias_loss_total,) + output
+            return ((lm_loss,) + output) if lm_loss is not None else output
+
+        # print('LM loss, Debias loss')
+        # print(output[0], output[1])
+
+        return GPT2DoubleHeadsModelOutput(
+            loss=lm_loss,
+            mc_loss=mc_loss,
+            logits=lm_logits,
+            mc_logits=mc_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+        )
