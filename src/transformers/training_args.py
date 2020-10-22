@@ -335,7 +335,10 @@ class TrainingArguments:
     demographic: Optional[str] = field(
         default=None, metadata={"help": "Demographic to be trained on"}
     )
-
+    debias_method: Optional[str] = field(
+        default=None, metadata={"help": "Type of debiasing method to be trained"}
+    )
+        
     def __post_init__(self):
         if self.disable_tqdm is None:
             self.disable_tqdm = logger.getEffectiveLevel() > logging.WARN
