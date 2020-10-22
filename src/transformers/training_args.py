@@ -319,6 +319,22 @@ class TrainingArguments:
     greater_is_better: Optional[bool] = field(
         default=None, metadata={"help": "Whether the `metric_for_best_model` should be maximized or not."}
     )
+        
+    debias_hyp: Optional[float] = field(
+        default=0, metadata={"help": "Hyperparameter for De-bias loss"}
+    )
+    lm_hyp: Optional[float] = field(
+        default=0, metadata={"help": "Hyperparameter for LM loss"}
+    )
+    embedding_type: Optional[str] = field(
+        default=None, metadata={"help": "Input or Output Embedding to use for Probabilities"}
+    )
+    handle_broken_token: Optional[str] = field(
+        default=None, metadata={"help": "To average token or last token"}
+    )
+    demographic: Optional[str] = field(
+        default=None, metadata={"help": "Demographic to be trained on"}
+    )
 
     def __post_init__(self):
         if self.disable_tqdm is None:
