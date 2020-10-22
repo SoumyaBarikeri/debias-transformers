@@ -1134,12 +1134,22 @@ class Trainer:
 
         Subclass and override for custom behavior.
         """
-        outputs = model(**inputs)
-        # Save past state if it exists
-        if self.args.past_index >= 0:
-            self._past = outputs[self.args.past_index]
-        # We don't use .loss here since the model may return tuples instead of ModelOutput.
-        return outputs[0] + outputs[1]
+        if self.args.debias_method is None:
+            outputs = model(**inputs)
+            # Save past state if it exists
+            if self.args.past_index >= 0:
+                self._past = outputs[self.args.past_index]
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            return outputs[0]
+        else:
+            outputs = model(**inputs, embedding_type=self.args.embedding_type, handle_broken_token=self.args.handle_broken_token,
+                            demographic=self.args.demographic)
+            # Save past state if it exists
+            if self.args.past_index >= 0:
+                self._past = outputs[self.args.past_index]
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            return self.args.lm_hyp * outputs[0] + self.args.debias_hyp * outputs[1]
+            
 
     def is_local_master(self) -> bool:
         """
