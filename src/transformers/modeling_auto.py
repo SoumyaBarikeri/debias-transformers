@@ -130,6 +130,7 @@ from .modeling_gpt2 import (
     GPT2LMHeadModel,
     GPT2Model,
     GPT2DoubleHeadsModelEqualisingLoss,
+    GPT2DoubleHeadsModelCosineDistLoss,
     GPT2DoubleHeadsModelCustomClassifier,
     GPT2DoubleHeadsModelSoftDebiasing,
     GPT2DoubleHeadsModelHardDebiasing,
@@ -431,6 +432,12 @@ MODEL_FOR_MULTIPLE_CHOICE_MAPPING = OrderedDict(
 MODEL_WITH_LM_AND_EQ_LOSS_MAPPING = OrderedDict(
     [
         (GPT2Config, GPT2DoubleHeadsModelEqualisingLoss),
+    ]
+)
+
+MODEL_WITH_LM_AND_COS_DIST_MAPPING = OrderedDict(
+    [
+        (GPT2Config, GPT2DoubleHeadsModelCosineDistLoss),
     ]
 )
 
