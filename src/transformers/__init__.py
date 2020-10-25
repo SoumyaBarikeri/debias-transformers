@@ -371,6 +371,12 @@ if is_torch_available():
         GPT2Model,
         GPT2PreTrainedModel,
         load_tf_weights_in_gpt2,
+        GPT2DoubleHeadsModelEqualisingLoss,
+        GPT2DoubleHeadsModelCosineDistLoss,
+        GPT2DoubleHeadsModelCustomClassifier,
+        GPT2DoubleHeadsModelSoftDebiasing,
+        GPT2DoubleHeadsModelHardDebiasing,
+        GPT2DoubleHeadsModelReligion2EqLoss,
     )
     from .modeling_layoutlm import (
         LAYOUTLM_PRETRAINED_MODEL_ARCHIVE_LIST,
