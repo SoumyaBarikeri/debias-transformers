@@ -35,7 +35,7 @@ from transformers import (
     DataCollatorForLanguageModeling,
     DataCollatorForPermutationLanguageModeling,
     HfArgumentParser,
-    LineByLineTextDatasetLabels,
+    # LineByLineTextDatasetLabels,
     LineByLineTextDataset,
     PreTrainedTokenizer,
     TextDataset,

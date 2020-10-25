@@ -1143,7 +1143,7 @@ class Trainer:
             return outputs[0]
         else:
             outputs = model(**inputs, embedding_type=self.args.embedding_type, handle_broken_token=self.args.handle_broken_token,
-                            demographic=self.args.demographic)
+                            demographic=self.args.demographic, target_pair_type=self.args.target_pair_type)
             # Save past state if it exists
             if self.args.past_index >= 0:
                 self._past = outputs[self.args.past_index]

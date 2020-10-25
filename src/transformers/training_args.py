@@ -338,6 +338,9 @@ class TrainingArguments:
     debias_method: Optional[str] = field(
         default=None, metadata={"help": "Type of debiasing method to be trained"}
     )
+    target_pair_type: Optional[str] = field(
+        default=None, metadata={"help": "Target pairs to be bias equalised on"}
+    )
         
     def __post_init__(self):
         if self.disable_tqdm is None:

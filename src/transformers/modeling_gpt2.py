@@ -1065,6 +1065,8 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
         # all_input_embeds = all_input_embeds.to(self.device)
         # target_ids_list = target_ids_list.to(self.device)
 #         debias_loss_total = debias_loss_total.to(self.device)
+        print(demographic)
+        print(embedding_type)
 
         if demographic:
             if embedding_type == 'input':
@@ -1121,12 +1123,11 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
 
                                 # debias_loss[torch.isnan(debias_loss)] = 0
                                 debias_loss = torch.sum(debias_loss)
-                                # print('debias_loss {}'.format(debias_loss))
+                                print('debias_loss {}'.format(debias_loss))
 
                                 debias_loss_total = debias_loss_total + debias_loss
 
                 debias_loss_total = debias_loss_total / (len(target_ids_list) * hidden_states.shape[1])
-
             elif target_pair_type == 'all_targets':
                 # print('hidden_states shape {}'.format(hidden_states.shape[1]))
                 for target_ids in target_ids_list:

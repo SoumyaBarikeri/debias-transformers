@@ -270,6 +270,7 @@ if is_torch_available():
         AutoModelForSequenceClassification,
         AutoModelForTokenClassification,
         AutoModelWithLMHead,
+        AutoModelWithLMAndDebiasHead,
     )
     from .modeling_bart import (
         BART_PRETRAINED_MODEL_ARCHIVE_LIST,
