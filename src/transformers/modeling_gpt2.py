@@ -1060,7 +1060,7 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
         # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
         # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
         #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
-        debias_loss_total = 0
+        debias_loss_total = torch.tensor(0)
         print(self.device)
         # all_input_embeds = all_input_embeds.to(self.device)
         # target_ids_list = target_ids_list.to(self.device)
@@ -1123,11 +1123,11 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
 
                                 # debias_loss[torch.isnan(debias_loss)] = 0
                                 debias_loss = torch.sum(debias_loss)
-                                print('debias_loss {}'.format(debias_loss))
+                                print('debias_loss {}, {}'.format(debias_loss, type(debias_loss)))
 
                                 debias_loss_total = debias_loss_total + debias_loss
 
-                debias_loss_total = debias_loss_total / (len(target_ids_list) * hidden_states.shape[1])
+                debias_loss_total = torch.true_divide(debias_loss_total, torch.mul(len(target_ids_list), hidden_states.shape[1]))
             elif target_pair_type == 'all_targets':
                 # print('hidden_states shape {}'.format(hidden_states.shape[1]))
                 for target_ids in target_ids_list:
@@ -1167,9 +1167,9 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
                     debias_loss = torch.sum(debias_loss)
 
                     debias_loss_total = debias_loss_total + debias_loss
-                    logger.info('debias_loss {}'.format(debias_loss))
+                    print('debias_loss {}, {}'.format(debias_loss, type(debias_loss)))
 
-                debias_loss_total = debias_loss_total / (len(target_ids_list) * hidden_states.shape[1])
+                debias_loss_total = torch.true_divide(debias_loss_total, torch.mul(len(target_ids_list), hidden_states.shape[1]))
 
         mc_loss = None
         if mc_labels is not None:
@@ -1182,18 +1182,16 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
             loss_fct = CrossEntropyLoss()
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
+        # debias_loss_total = torch.tensor(debias_loss_total)
         # lm_loss = lm_loss + debias_loss_total
-        print('total per sent debias_loss {}'.format(debias_loss_total))
-        print('lm loss {}'.format(lm_loss))
+        print('total per sent debias_loss {}, {}'.format(debias_loss_total, type(debias_loss_total)))
+        print('lm loss {}, {}'.format(lm_loss, type(lm_loss)))
 
         if not return_dict:
             output = (lm_logits, mc_logits) + transformer_outputs[1:]
             # if debias_loss_total is not None:
             output = (debias_loss_total,) + output
             return ((lm_loss,) + output) if lm_loss is not None else output
-
-        # print('LM loss, Debias loss')
-        # print(output[0], output[1])
 
         return GPT2DoubleHeadsModelOutput(
             loss=lm_loss,
@@ -1328,15 +1326,17 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
             # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
             # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
             #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
-
+            # [[Ġgay, ], [Ġgays, ], [Ġlesbians, ], [Ġlesbian], [Ġbisexual, Ġmono], [Ġhomosexual, ], [Ġhomosexuals, ],
+            #  [Ġtransgender, Ġcis], [Ġtrans, Ġcis], [Ġqueer, Ġheterosexual], [Ġpan, Ġheterosexual]]
             # muslim targets - last token eq
             if demographic == 'religion1':
                 target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
             elif demographic == 'religion2':
                 print(demographic)
                 target_ids_list = [[2475, 666], [2543, 414], [8937, 504]]
-
-
+            elif demographic == 'orientation':
+                target_ids_list = [[5650, 3892], [28067, 3892], [34210, 3892], [17834, 3892], [24249, 33361], [11479, 24026],
+                                   [35655, 24026], [10637, 33325], [1007, 33325], [24506, 24026], [3425, 24026]]
 
             # attribute_list = [31828, 18536, 10461, 23542, 6181, 25513, 50186, 18536, 14918, 15773, 39835, 10489, 17118,
             #                   18204, 47620, 6272, 47859, 41520, 7812]

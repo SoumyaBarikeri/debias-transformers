@@ -341,6 +341,10 @@ class TrainingArguments:
     target_pair_type: Optional[str] = field(
         default=None, metadata={"help": "Target pairs to be bias equalised on"}
     )
+    norm_debias_loss: Optional[bool] = field(
+        default=False,
+        metadata={"help": "If debias_method=Equalising loss, whether to noemalise debias loss by sentence token length"}
+    )
         
     def __post_init__(self):
         if self.disable_tqdm is None:
