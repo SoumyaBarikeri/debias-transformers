@@ -1690,8 +1690,8 @@ class AutoModelWithLMAndDebiasHead:
 
         debiasing_head = kwargs.pop("debiasing_head", None)
         mappings = [MODEL_WITH_LM_AND_EQ_LOSS_MAPPING, MODEL_WITH_LM_AND_EQ_LOSS_RELG2_MAPPING,
-                    MODEL_WITH_LM_AND_HARD_DEBIAS_MAPPING,
-                    MODEL_WITH_LM_AND_SOFT_DEBIAS_MAPPING, MODEL_WITH_LM_AND_CLASSIFIER_MAPPING]
+                    MODEL_WITH_LM_AND_HARD_DEBIAS_MAPPING, MODEL_WITH_LM_AND_SOFT_DEBIAS_MAPPING,
+                    MODEL_WITH_LM_AND_COS_DIST_MAPPING, MODEL_WITH_LM_AND_CLASSIFIER_MAPPING]
 
         for mapping in mappings:
             if debiasing_head in mapping.values().__str__():

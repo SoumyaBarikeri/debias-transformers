@@ -1143,12 +1143,13 @@ class Trainer:
             return outputs[0]
         else:
             outputs = model(**inputs, embedding_type=self.args.embedding_type, handle_broken_token=self.args.handle_broken_token,
-                            demographic=self.args.demographic, target_pair_type=self.args.target_pair_type)
+                            demographic=self.args.demographic, target_pair_type=self.args.target_pair_type,
+                            lm_hyp=self.args.lm_hyp, debias_hyp=self.args.debias_hyp, norm_debias_loss=self.args.norm_debias_loss)
             # Save past state if it exists
             if self.args.past_index >= 0:
                 self._past = outputs[self.args.past_index]
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
-            return self.args.lm_hyp * outputs[0] + self.args.debias_hyp * outputs[1]
+            return outputs[0]
 
     def is_local_master(self) -> bool:
         """

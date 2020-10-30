@@ -995,6 +995,9 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
         handle_broken_token=None,
         demographic=None,
         target_pair_type=None,
+        lm_hyp=None,
+        debias_hyp=None,
+        norm_debias_loss=None,
         **kwargs,
     ):
         r"""
@@ -1053,100 +1056,87 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
         lm_logits = self.lm_head(hidden_states)
         mc_logits = self.multiple_choice_head(hidden_states, mc_token_ids).squeeze(-1)
 
-        # [[Ġjew, ĠChristian], [ĠJews, ĠChristians], [ĠJudaism, ĠChristianity], [ĠJewish, ĠChristian],
-        # [Jew, Christian]]
-        # target_ids_list = torch.LongTensor([[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]])
-        # [[ĠMuslims, ĠChristians], [Muslims, ĠChristians], [Muslim, Christian], [ĠMuslim, ĠChristian],
-        # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
-        # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
-        #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
         debias_loss_total = torch.tensor(0)
-        print(self.device)
-        # all_input_embeds = all_input_embeds.to(self.device)
-        # target_ids_list = target_ids_list.to(self.device)
-#         debias_loss_total = debias_loss_total.to(self.device)
-        print(demographic)
-        print(embedding_type)
 
         if demographic:
             if embedding_type == 'input':
-                print(embedding_type)
                 all_input_embeds = self.transformer.get_input_embeddings()  # uncomment incase of input embed
+                all_input_embeds = all_input_embeds.to(self.device)
             elif embedding_type == 'output':
-                print(embedding_type)
                 all_output_embeds = self.lm_head.weight.data
-
+                all_output_embeds = all_output_embeds.to(self.device)
             # [[Ġjew, ĠChristian], [ĠJews, ĠChristians], [ĠJudaism, ĠChristianity], [ĠJewish, ĠChristian],
             # [Jew, Christian]]
-            # target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
             # [[ĠMuslims, ĠChristians], [Muslims, ĠChristians], [Muslim, Christian], [ĠMuslim, ĠChristian],
             # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
-            # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
-            #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
 
             # muslim targets - last token eq
             if demographic == 'religion1':
-                print(demographic)
                 target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+                target_ids_list = torch.LongTensor(target_ids_list)
+                target_ids_list = target_ids_list.to(self.device)
             elif demographic == 'religion2':
-                print(demographic)
                 target_ids_list = [[2475, 666], [2543, 414], [8937, 504]]
+                # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
+                #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
+                target_ids_list = torch.LongTensor(target_ids_list)
+                target_ids_list = target_ids_list.to(self.device)
+            elif demographic == 'orientation':
+                target_ids_list = [[5650, 3892], [28067, 3892], [34210, 3892], [17834, 3892], [24249, 33361], [11479, 24026],
+                                   [35655, 24026], [10637, 33325], [1007, 33325], [24506, 24026], [3425, 24026]]
+                target_ids_list = torch.LongTensor(target_ids_list)
+                target_ids_list = target_ids_list.to(self.device)
+
+            make_mask = labels.clone()
+            make_mask[make_mask > 0] = 1
+            make_mask[make_mask < 0] = 0
+
+            remove_pad_mask = make_mask.unsqueeze(-1).expand(hidden_states.size())
+            hidden_states_no_pad_token = hidden_states * remove_pad_mask
 
             if target_pair_type == 'per_sent_targets':
                 for i, input_id in enumerate(input_ids):
-                    for target_ids in target_ids_list:
-                        for t_id in target_ids:
-                            if t_id in input_id:
-                                # print(target_ids)
-                                if embedding_type == 'input':
-                                    target_embeds = all_input_embeds(
-                                        torch.LongTensor(target_ids))  # uncomment for input embed
-                                elif embedding_type == 'output':
-                                    target_embeds = all_output_embeds[target_ids]
-                                # print(target_embeds)
-                                # print('hidden_states[i] {}'.format((hidden_states[i]).shape))
-                                debias_logits = self.debias_head(hidden_states[i], weight=target_embeds)
-                                # print('debias_logits {}'.format(debias_logits))
+                    for t_i, target in enumerate(target_ids_list[:, 0]):
+                        if target in input_id:
+                            # print('target {}'.format(target))
+                            # print(target_ids_list[t_i])
+                            if embedding_type == 'input':
+                                target_embeds = all_input_embeds(target_ids_list[t_i])
+                            elif embedding_type == 'output':
+                                target_embeds = all_output_embeds[target_ids_list[t_i]]
 
-                                softmax_layer = nn.Softmax(dim=1)
-                                debias_softmax = softmax_layer(debias_logits)
-                                # print('debias_softmax {}'.format(debias_softmax))
+                            debias_logits = self.debias_head(hidden_states_no_pad_token[i], weight=target_embeds)
 
-                                debias_softmax = torch.squeeze(debias_softmax)
+                            softmax_layer = nn.Softmax(dim=1)
+                            debias_softmax = softmax_layer(debias_logits)
+                            debias_softmax = torch.squeeze(debias_softmax)
 
-                                debias_softmax_1 = torch.flatten(debias_softmax[:, 0])
-                                debias_softmax_2 = torch.flatten(debias_softmax[:, 1])
-                                # print(debias_softmax_1)
-                                # print(debias_softmax_2)
+                            debias_softmax_1 = torch.flatten(debias_softmax[:, 0])
+                            debias_softmax_2 = torch.flatten(debias_softmax[:, 1])
 
-                                debias_loss = torch.abs(torch.log(debias_softmax_1 / debias_softmax_2))
-
-                                # debias_loss[torch.isnan(debias_loss)] = 0
+                            debias_loss = torch.abs(torch.log(debias_softmax_1 / debias_softmax_2))
+                            # print(torch.sum(input_id != 50257))
+                            if norm_debias_loss:
+                                debias_loss = torch.sum(debias_loss) / torch.sum(input_id != 50257)
+                            else:
                                 debias_loss = torch.sum(debias_loss)
-                                print('debias_loss {}, {}'.format(debias_loss, type(debias_loss)))
 
-                                debias_loss_total = debias_loss_total + debias_loss
+                            debias_loss_total = debias_loss_total + debias_loss
 
-                debias_loss_total = torch.true_divide(debias_loss_total, torch.mul(len(target_ids_list), hidden_states.shape[1]))
+                debias_loss_total = torch.true_divide(debias_loss_total, target_ids_list.shape[0])
             elif target_pair_type == 'all_targets':
-                # print('hidden_states shape {}'.format(hidden_states.shape[1]))
                 for target_ids in target_ids_list:
 
                     if embedding_type == 'input':
-                        target_embeds = all_input_embeds(torch.LongTensor(target_ids))  # uncomment for input embed
+                        target_embeds = all_input_embeds(torch.LongTensor(target_ids))
                     elif embedding_type == 'output':
                         target_embeds = all_output_embeds[target_ids]
 
-                    debias_logits = self.debias_head(hidden_states.view(-1, hidden_states.size(-2), hidden_states.size(-1)),
+                    debias_logits = self.debias_head(hidden_states_no_pad_token.view(-1, hidden_states_no_pad_token.size(-2), hidden_states_no_pad_token.size(-1)),
                                                      weight=target_embeds.view(-1, target_embeds.size(-1)))
-                    # print('debias_logits {}'.format(debias_logits))
 
                     softmax_layer = nn.Softmax(dim=2)
                     debias_softmax = softmax_layer(debias_logits)
-                    # print('debias_softmax {}'.format(debias_softmax))
-
-                    # debias_softmax = torch.squeeze(debias_softmax)
-                    # print('after squeeze debias_softmax {}'.format(debias_softmax))
 
                     if len(list(debias_softmax.shape)) == 3:
                         debias_softmax_1 = torch.flatten(debias_softmax[:, :, 0])
@@ -1154,22 +1144,23 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
                     elif len(list(debias_softmax.shape)) == 2:
                         debias_softmax_1 = torch.flatten(debias_softmax[:, 0])
                         debias_softmax_2 = torch.flatten(debias_softmax[:, 1])
-                    # print('debias_softmax_1 {}'.format(debias_softmax_1))
-                    # print('debias_softmax_2 {}'.format(debias_softmax_2))
-
-                    log_eq = torch.log(debias_softmax_1 / debias_softmax_2)
-                    # print('log_eq {}'.format(log_eq))
 
                     debias_loss = torch.abs(torch.log(debias_softmax_1 / debias_softmax_2))
-                    # print('abs db loss {}'.format(debias_loss))
 
-                    # debias_loss[torch.isnan(debias_loss)] = 0
                     debias_loss = torch.sum(debias_loss)
-
+                    print('db loss {}'.format(debias_loss))
                     debias_loss_total = debias_loss_total + debias_loss
-                    print('debias_loss {}, {}'.format(debias_loss, type(debias_loss)))
+                    logger.info('debias_loss {}'.format(debias_loss))
 
-                debias_loss_total = torch.true_divide(debias_loss_total, torch.mul(len(target_ids_list), hidden_states.shape[1]))
+                print('debias_loss_total {}'.format(debias_loss_total))
+
+                if norm_debias_loss:
+                    print(target_ids_list.shape[0], hidden_states_no_pad_token.shape[1])
+                    debias_loss_total = torch.true_divide(debias_loss_total, torch.mul(target_ids_list.shape[0],
+                                                                                       hidden_states_no_pad_token.shape[1]))
+                else:
+                    debias_loss_total = torch.true_divide(debias_loss_total, target_ids_list.shape[0])
+                print('norm debias_loss_total {}'.format(debias_loss_total))
 
         mc_loss = None
         if mc_labels is not None:
@@ -1177,24 +1168,29 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
             mc_loss = loss_fct(mc_logits.view(-1, mc_logits.size(-1)), mc_labels.view(-1))
         lm_loss = None
         if labels is not None:
+            # print(labels)
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             loss_fct = CrossEntropyLoss()
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-        # debias_loss_total = torch.tensor(debias_loss_total)
         # lm_loss = lm_loss + debias_loss_total
-        print('total per sent debias_loss {}, {}'.format(debias_loss_total, type(debias_loss_total)))
-        print('lm loss {}, {}'.format(lm_loss, type(lm_loss)))
+        print('total eq debias_loss is {}'.format(debias_loss_total))
+        print('lm loss {}'.format(lm_loss))
+
+        total_loss = None
+        if debias_loss_total:
+            total_loss = lm_hyp * lm_loss + debias_hyp * debias_loss_total
+        else:
+            # This loss is used for evaluation
+            total_loss = lm_loss
 
         if not return_dict:
             output = (lm_logits, mc_logits) + transformer_outputs[1:]
-            # if debias_loss_total is not None:
-            output = (debias_loss_total,) + output
-            return ((lm_loss,) + output) if lm_loss is not None else output
+            return ((total_loss,) + output) if lm_loss is not None else output
 
         return GPT2DoubleHeadsModelOutput(
-            loss=lm_loss,
+            loss=total_loss,
             mc_loss=mc_loss,
             logits=lm_logits,
             mc_logits=mc_logits,
@@ -1251,6 +1247,9 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
             handle_broken_token=None,
             demographic=None,
             target_pair_type=None,
+            lm_hyp=None,
+            debias_hyp=None,
+            norm_debias_loss=None,
             **kwargs,
     ):
         r"""
@@ -1310,7 +1309,7 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
         mc_logits = self.multiple_choice_head(hidden_states, mc_token_ids).squeeze(-1)
 
         # print('lm_logits {}'.format(lm_logits))
-        debias_loss_total = 0
+        debias_loss_total = torch.tensor(0)
 
         if demographic:
             if embedding_type == 'input':
@@ -1321,68 +1320,76 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
 
             # [[Ġjew, ĠChristian], [ĠJews, ĠChristians], [ĠJudaism, ĠChristianity], [ĠJewish, ĠChristian],
             # [Jew, Christian]]
-            # target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
             # [[ĠMuslims, ĠChristians], [Muslims, ĠChristians], [Muslim, Christian], [ĠMuslim, ĠChristian],
             # [ĠIslam, ĠChristianity], [Islam, ĠChristianity], [ĠIslamic, ĠChristian], [Islamic, Christian], [ĠArab, ĠAmerican], [Arab, American]]
-            # target_ids_list = [[7045, 9316], [36452, 9316], [17067, 20298], [3765, 4302], [3449, 13624], [16991, 13624],
-            #                    [5533, 4302], [26723, 20298], [4498, 1605], [31602, 7437]]
             # [[Ġgay, ], [Ġgays, ], [Ġlesbians, ], [Ġlesbian], [Ġbisexual, Ġmono], [Ġhomosexual, ], [Ġhomosexuals, ],
             #  [Ġtransgender, Ġcis], [Ġtrans, Ġcis], [Ġqueer, Ġheterosexual], [Ġpan, Ġheterosexual]]
             # muslim targets - last token eq
             if demographic == 'religion1':
                 target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+                attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859,
+                                  29349,
+                                  39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
+                attribute_list = [[25474], [34712], [25513], [34781], [2587, 2569], [1588, 9686], [2266, 4190], [31828],
+                                  [18790, 306], [18790], [277, 2143, 282], [5636, 2135], [22279], [625, 11235, 13967],
+                                  [7812], [8361], [4574, 88], [15773], [6272], [30651], [625, 28655], [32874], [20363],
+                                  [6181], [17118], [3332, 272], [18536], [12718], [8169, 1659], [7894], [47859], [39904],
+                                  [1035, 265, 3379], [914, 368, 4559], [50186], [17156, 9892], [4456, 37561], [8011],
+                                  [23373], [307, 4597], [20983], [36135], [7971]]
+
             elif demographic == 'religion2':
                 print(demographic)
                 target_ids_list = [[2475, 666], [2543, 414], [8937, 504]]
+                attribute_list = [7417, 42002, 10509, 33184, 2372, 19971, 4923, 10309, 1368, 3434, 26127, 38313, 34082,
+                                  17162, 12954, 4301, 4472, 5775, 1175, 20440, 20674, 7702, 42325, 5465, 5527, 16931,
+                                  43115, 38466, 38007, 13384, 14273, 48492, 25765, 41932, 42301, 36108, 35052, 33908,
+                                  3685, 6590, 12524, 26592]
+                attribute_list = [[7417], [8649], [2372], [16180], [4923], [10309], [1368], [5194], [5123], [16836, 441],
+                                  [4301], [4472], [1175], [5775], [20440], [7702], [5465], [5527], [16931], [43115],
+                                  [38007], [13384], [14273], [48492], [25765], [41932], [36108], [42301], [29489], [17017],
+                                  [26655], [47641], [33908], [21213], [7341, 5194], [3685], [6590], [12524], [26592], [35052]]
+
             elif demographic == 'orientation':
                 target_ids_list = [[5650, 3892], [28067, 3892], [34210, 3892], [17834, 3892], [24249, 33361], [11479, 24026],
                                    [35655, 24026], [10637, 33325], [1007, 33325], [24506, 24026], [3425, 24026]]
+                attribute_list = [[14946, 2801], [25052, 10877], [781, 4131, 726, 415], [27706, 576], [3206, 30135],
+                                  [5110, 8967], [16687], [11389, 11868], [2563, 19678], [6507, 396], [10848], [17290],
+                                  [21421], [10092], [6977], [1200, 38466], [1552, 2304, 5623], [37833], [6715, 16599],
+                                  [8718, 18338], [277, 9460, 313], [4939], [44295], [30256], [21757], [7813], [4369], [6283],
+                                  [7650], [26769], [31756], [31955], [1128, 22220], [6730, 10366], [44858], [8564], [850, 33532],
+                                  [7016], [19095], [31193], [29077, 13911], [12954], [583, 13658], [583, 24040], [10416]]
 
-            # attribute_list = [31828, 18536, 10461, 23542, 6181, 25513, 50186, 18536, 14918, 15773, 39835, 10489, 17118,
-            #                   18204, 47620, 6272, 47859, 41520, 7812]
-
-            attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859, 29349,
-                              39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
-            # aggressive - Ġaggressive 8361, pushy 'Ġpush', 'y' 4574 88, immigrant Ġimmigrants Ġimmigrant Ġimmigration 7971 15773 6272,
-            # dominating Ġdominating 30651, overbearing 'Ġover', 'bearing' 625, 28655, selfish Ġselfish 20363, spoiled Ġspoiled 34781,
-            # insatiable 'Ġins', 'at', 'iable' 1035, 265, 3379, long noses Ġlong', 'Ġnoses' 890, 41760, overprotective 'Ġover', 'prot', 'ective',
-            # evil Ġevil 6181, devil Ġdevil 17118, satan 'Ġsat', 'an' 3332, 272, inferior Ġinferior 18536, manipulative Ġmanipulative 47859,
-            # manipulating Ġmanipulating 29349, cannibal Ġcannibal 39904, cannibals, effeminate 'Ġeff', 'em', 'inate' 914, 368, 4559,
-            # conspiring Ġconspiring 50186, greed Ġgreed 25474, greedy Ġgreedy 31828, nerd Ġnerd 34712, nerds Ġnerds 47088
-            # circumcision Ġcircumcision 25513, circumcise Ġcircumcised 45522, materialistic, hook Ġhook 8011, hooked Ġhooked 23373,
-            # beady eyes, large nose, red hair 'Ġred', 'Ġhair' 2266, 4190, frugal 'Ġf', 'rug', 'al', lust Ġlust 22279,
-            # target_embeds = all_input_embeds(torch.LongTensor([3370, 4302]))
-
-            # attribute_list_relg2 = [7417, 42002, 10509, 33184, 2372, 19971, 4923, 10309, 1368, 3434, 26127, 38313, 34082, 17162,
-            #                   12954, 4301, 4472, 5775, 1175, 20440, 20674, 7702, 42325, 5465, 5527, 16931, 43115, 38466,
-            #                   38007, 13384, 14273, 48492, 25765, 41932, 42301, 36108, 35052, 33908, 3685, 6590, 12524, 26592]
-            # left out attributes muslim - hijackers, lazy sheik, oil sheik, viel, vielded, deport, detain, thieves, charlatan,
-            # power-hungry, beard*, "wealthy oilmen", "harem maiden*", "suicide bomb*", headscarves
             cos = nn.CosineSimilarity(dim=0)
 
-            for i_sent, input_id_1 in enumerate(input_ids):
-                for i, input_id in enumerate(input_id_1):
-                    if input_id in attribute_list:
-                        # print(input_id)
-                        # print((hidden_states[i_sent, i]).shape)
-                        # print((target_embeds[0]).shape)
-                        # print('cosine b/w jews and attributes')
-                        # print(cos(hidden_states[i_sent, i], target_embeds[0]))
-                        # print('cosine b/w christians and attributes')
-                        # print(cos(hidden_states[i_sent, i], target_embeds[1]))
-                        for target_ids in target_ids_list:
-                            if embedding_type == 'input':
-                                target_embeds = all_input_embeds(
-                                    torch.LongTensor(target_ids))  # uncomment for input embed
-                            elif embedding_type == 'output':
-                                target_embeds = all_output_embeds[target_ids]
+            for i_sent, sent in enumerate(input_ids):
+                # print(sent)
+                for i, input_id in enumerate(sent):
+                    for attr in attribute_list:
+                        # print(attr)
+                        if input_id in attr:
+                            # print('id is {}'.format(input_id))
 
-                            debias_loss = torch.abs((1 - cos(hidden_states[i_sent, i], target_embeds[0])) - (1 - cos(hidden_states[i_sent, i], target_embeds[1])))
-                            # print(debias_loss)
-                            debias_loss_total = debias_loss_total + debias_loss
+                            if len(attr) > 1:
+                                # if all(i1 in attr for i1 in sent[i:i+len(attr)]):
+                                # print('multi id {}'.format(attr))
+                                hidden_state = hidden_states[i_sent, i:i + len(attr)]
+                                hidden_state = torch.mean(hidden_state, 0)
+                            else:
+                                # print('single id {}'.format(input_id))
+                                hidden_state = hidden_states[i_sent, i]
+                            # print(hidden_state)
+                            for target_ids in target_ids_list:
+                                if embedding_type == 'input':
+                                    target_embeds = all_input_embeds(
+                                        torch.LongTensor(target_ids))  # uncomment for input embed
+                                elif embedding_type == 'output':
+                                    target_embeds = all_output_embeds[target_ids]
 
-            debias_loss_total = debias_loss_total
+                                debias_loss = torch.abs((1 - cos(hidden_state, target_embeds[0]))
+                                                        - (1 - cos(hidden_state, target_embeds[1])))
 
+                                debias_loss_total = debias_loss_total + debias_loss
+                            break
 
         mc_loss = None
         if mc_labels is not None:
@@ -1396,17 +1403,24 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         # lm_loss = lm_loss + debias_loss_total
-        print('eq debias_loss {} in custom loss fn'.format(debias_loss_total))
+        print('cos debias_loss {} in custom loss fn'.format(debias_loss_total))
         print('lm loss {}'.format(lm_loss))
+
+        total_loss = None
+        if debias_loss_total:
+            total_loss = lm_hyp * lm_loss + debias_hyp * debias_loss_total
+        else:
+            # This loss is used for evaluation
+            total_loss = lm_loss
 
         if not return_dict:
             output = (lm_logits, mc_logits) + transformer_outputs[1:]
             # if debias_loss_total is not None:
-            output = (debias_loss_total,) + output
-            return ((lm_loss,) + output) if lm_loss is not None else output
+            # output = (debias_loss_total,) + output
+            return ((total_loss,) + output) if lm_loss is not None else output
 
         return GPT2DoubleHeadsModelOutput(
-            loss=lm_loss,
+            loss=total_loss,
             mc_loss=mc_loss,
             logits=lm_logits,
             mc_logits=mc_logits,
@@ -1994,6 +2008,13 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
             output_attentions=None,
             output_hidden_states=None,
             return_dict=None,
+            embedding_type=None,
+            handle_broken_token=None,
+            demographic=None,
+            target_pair_type=None,
+            lm_hyp=None,
+            debias_hyp=None,
+            norm_debias_loss=None,
             **kwargs,
     ):
         r"""
@@ -2043,69 +2064,117 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
             return_dict=return_dict,
         )
 
-        # print('input_ids: {}'.format(input_ids))
-
         hidden_states = transformer_outputs[0]
-        print('hidden_states shape: {}'.format(hidden_states.shape))
-        # print('hidden_states: {}'.format(hidden_states))
-        # print('hidden states last {}'.format(hidden_states[:,-1]))
-
-        attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859, 29349,
-                          39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
-        target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
-
-        lm_head_weights = self.lm_head.weight.data
-        # print('lm_head_weight_shape {}'.format(lm_head_weights.shape))
-        # print('first word weight {}'.format(lm_head_weights[0]))
-
-        diff_matrix = torch.zeros((5, 768))
-        for i, target_pair in enumerate(target_ids_list):
-            j_w = lm_head_weights[target_pair[0]]
-            c_w = lm_head_weights[target_pair[1]]
-            diff_w = (c_w - j_w) / 2
-            diff_matrix[i] = diff_w
-
-        # print('diff_matrix {}, shape {}'.format(diff_matrix, diff_matrix.shape))
-        u, s, v = torch.svd(diff_matrix)
-
-        # print(u.shape)
-        # print(s.shape)
-        # print(v.shape)
-
-        v_k = v[:, :3]
-        # print(v_k.shape)
-
-        # neutralise hidden states of all words
-        '''
-        word_projection_total = torch.zeros([768])
-        for input in range(hidden_states.shape[0]):
-            print('sentence length {}'.format(hidden_states[input].shape[0]))
-            for word in range(hidden_states[input].shape[0]):
-                word_embedding = hidden_states[input, word]
-                # print('word_embedding {}'.format(word_embedding))
-                for b in range(v_k.shape[1]):
-                    word_projection = torch.dot(word_embedding, v_k[:, b]) * v_k[:, b]
-                    # print('word_projection shape {}'.format(word_projection.shape))
-                    word_projection_total += word_projection
-                hidden_states[input, word] = hidden_states[input, word] - word_projection_total
-        '''
-
-        # neutralise hidden states of attribute words
-        word_projection_total = torch.zeros([768])
-        for i_sent, input_id_1 in enumerate(input_ids):
-            for i, input_id in enumerate(input_id_1):
-                if input_id in attribute_list:
-                    print(input_id)
-                    word_embedding = hidden_states[i_sent, i]
-                    # print('word_embedding {}'.format(word_embedding))
-                    for b in range(v_k.shape[1]):
-                        word_projection = torch.dot(word_embedding, v_k[:, b]) * v_k[:, b]
-                        # print('word_projection shape {}'.format(word_projection.shape))
-                        word_projection_total += word_projection
-                    hidden_states[i_sent, i] = hidden_states[i_sent, i] - word_projection_total
-
         lm_logits = self.lm_head(hidden_states)
+        # print(input_ids[0])
 
+        hd_loss_total = torch.tensor(0)
+
+        if demographic:
+            if demographic == 'religion1':
+                attribute_list = [8361, 7971, 15773, 6272, 30651, 28655, 20363, 34781, 890, 6181, 17118, 18536, 47859,
+                                  29349,
+                                  39904, 50186, 25474, 31828, 34712, 47088, 25513, 45522, 8011, 23373, 2266, 22279]
+                target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298]]
+                attribute_list = [[25474, 0, 0], [34712, 0, 0], [25513, 0, 0], [34781, 0, 0], [2587, 2569, 0],
+                                  [1588, 9686, 0], [2266, 4190, 0], [31828, 0, 0], [18790, 306, 0], [18790, 0, 0],
+                                  [277, 2143, 282], [5636, 2135, 0], [22279, 0, 0], [625, 11235, 13967], [7812, 0, 0],
+                                  [8361, 0, 0], [4574, 88, 0], [15773, 0, 0], [6272, 0, 0], [30651, 0, 0], [625, 28655, 0],
+                                  [32874, 0, 0], [20363, 0, 0], [6181, 0, 0], [17118, 0, 0], [3332, 272, 0], [18536, 0, 0],
+                                  [12718, 0, 0], [8169, 1659, 0], [7894, 0, 0], [47859, 0, 0], [39904, 0, 0],
+                                  [1035, 265, 3379], [914, 368, 4559], [50186, 0, 0], [17156, 9892, 0], [4456, 37561, 0],
+                                  [8011, 0, 0], [23373, 0, 0], [307, 4597, 0], [20983, 0, 0], [36135, 0, 0], [7971, 0, 0]]
+            elif demographic == 'religion2':
+                print(demographic)
+                target_ids_list = [[2475, 666], [2543, 414], [8937, 504]]
+                attribute_list = [7417, 42002, 10509, 33184, 2372, 19971, 4923, 10309, 1368, 3434, 26127, 38313, 34082,
+                                  17162, 12954, 4301, 4472, 5775, 1175, 20440, 20674, 7702, 42325, 5465, 5527, 16931,
+                                  43115, 38466, 38007, 13384, 14273, 48492, 25765, 41932, 42301, 36108, 35052, 33908,
+                                  3685, 6590, 12524, 26592]
+                attribute_list = [[7417, 0], [8649, 0], [2372, 0], [16180, 0], [4923, 0], [10309, 0], [1368, 0], [5194, 0],
+                                  [5123, 0], [16836, 441], [4301, 0], [4472, 0], [1175, 0], [5775, 0], [20440, 0], [7702, 0],
+                                  [5465, 0], [5527, 0], [16931, 0], [43115, 0], [38007, 0], [13384, 0], [14273, 0], [48492, 0],
+                                  [25765, 0], [41932, 0], [36108, 0], [42301, 0], [29489, 0], [17017, 0], [26655, 0],
+                                  [47641, 0], [33908, 0], [21213, 0], [7341, 5194], [3685, 0], [6590, 0], [12524, 0],
+                                  [26592, 0], [35052, 0]]
+
+            elif demographic == 'orientation':
+                target_ids_list = [[5650, 3892], [28067, 3892], [34210, 3892], [17834, 3892], [24249, 33361],
+                                   [11479, 24026],
+                                   [35655, 24026], [10637, 33325], [1007, 33325], [24506, 24026], [3425, 24026]]
+                attribute_list = [[14946, 2801, 0, 0], [25052, 10877, 0, 0], [781, 4131, 726, 415], [27706, 576, 0, 0],
+                                  [3206, 30135, 0, 0], [5110, 8967, 0, 0], [16687, 0, 0, 0], [11389, 11868, 0, 0],
+                                  [2563, 19678, 0, 0], [6507, 396, 0, 0], [10848, 0, 0, 0], [17290, 0, 0, 0],
+                                  [21421, 0, 0, 0], [10092, 0, 0, 0], [6977, 0, 0, 0], [1200, 384660, 0, 0],
+                                  [1552, 2304, 5623, 0],
+                                  [378330, 0, 0, 0], [6715, 165990, 0, 0], [8718, 183380, 0, 0], [277, 9460, 313, 0],
+                                  [49390, 0, 0, 0], [44295, 0, 0, 0], [30256, 0, 0, 0], [21757, 0, 0, 0],
+                                  [7813, 0, 0, 0],
+                                  [4369, 0, 0, 0], [6283, 0, 0, 0], [7650, 0, 0, 0], [26769, 0, 0, 0], [31756, 0, 0, 0],
+                                  [31955, 0, 0, 0], [1128, 22220, 0, 0], [6730, 10366, 0, 0], [44858, 0, 0, 0],
+                                  [8564, 0, 0, 0],
+                                  [850, 33532, 0, 0], [7016, 0, 0, 0], [19095, 0, 0, 0], [31193, 0, 0, 0],
+                                  [29077, 13911, 0, 0],
+                                  [12954, 0, 0, 0], [583, 13658, 0, 0], [583, 24040, 0, 0], [10416, 0, 0, 0]]
+
+            target_ids_list = torch.tensor(target_ids_list)
+            target_ids_list = target_ids_list.to(self.device)
+
+            attribute_list = torch.tensor(attribute_list)
+            attribute_list = attribute_list.to(self.device)
+
+            lm_head_weights = self.lm_head.weight.data
+
+            diff_matrix = torch.zeros((11, 768))
+            for i, target_pair in enumerate(target_ids_list):
+                j_w = lm_head_weights[target_pair[0]]
+                c_w = lm_head_weights[target_pair[1]]
+                diff_w = (c_w - j_w) / 2
+                diff_matrix[i] = diff_w
+
+            u, s, v = torch.svd(diff_matrix)
+            print('s value {}'.format(s))
+            v_k = v[:, :5]
+
+            # neutralise hidden states of attribute words
+            word_projection_total = torch.zeros([768])
+            # for i_sent, input_id_1 in enumerate(input_ids):
+            #     for i, input_id in enumerate(input_id_1):
+            #         if input_id in attribute_list:
+            #             # print(input_id)
+            #             word_embedding = hidden_states[i_sent, i]
+            #             for b in range(v_k.shape[1]):
+            #                 word_projection = torch.dot(word_embedding, v_k[:, b]) * v_k[:, b]
+            #                 word_projection_total += word_projection
+            # hidden_states[i_sent, i] = hidden_states[i_sent, i] - word_projection_total
+
+            for i_sent, sent in enumerate(input_ids):
+                # print(sent)
+                for i, input_id in enumerate(sent):
+                    for x, attr in enumerate(attribute_list):
+                        # print(attr)
+                        # print(input_id)
+                        if input_id in attr:
+                            # print('id is {}'.format(input_id))
+                            if torch.sum(attr != 0) > 1:
+                                # if len(attr) > 1:
+                                if all(i1 in attr for i1 in sent[i:i + torch.sum(attr != 0)]):
+                                    # print('multi id {}'.format(attr))
+                                    hidden_state = hidden_states[i_sent, i:i + torch.sum(attr != 0)]
+                                    # print(hidden_state)
+                                    hidden_state_final = torch.mean(hidden_state, 0)
+                                else:
+                                    hidden_state_final = torch.zeros([768])
+                            else:
+                                # print('single id {}'.format(input_id))
+                                hidden_state_final = hidden_states[i_sent, i]
+
+                            for b in range(v_k.shape[1]):
+                                word_projection = torch.dot(hidden_state_final, v_k[:, b]) * v_k[:, b]
+                                word_projection_total += word_projection
+                            hd_loss = torch.abs(torch.sum(word_projection_total))
+                            hd_loss_total = hd_loss_total + hd_loss
+                            break
 
         lm_loss = None
         if labels is not None:
@@ -2115,18 +2184,18 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
         # lm_loss = lm_loss + debias_loss_total
-        print('lm loss {}'.format(lm_loss))
+        if hd_loss_total:
+            print('Hd loss {}'.format(hd_loss))
+            lm_loss = lm_hyp * lm_loss + debias_hyp * hd_loss_total
+        print('lm loss in hard debias {}'.format(lm_loss))
 
         if not return_dict:
             output = (lm_logits,) + transformer_outputs[1:]
-            # output = (bias_loss,) + output
-            # print(((lm_loss,) + output))
             return ((lm_loss,) + output) if lm_loss is not None else output
 
-        # print('LM loss, Debias loss')
-        # print(output[0], output[1])
         mc_loss = None
         mc_logits = None
+
         return GPT2DoubleHeadsModelOutput(
             loss=lm_loss,
             mc_loss=mc_loss,
@@ -2234,7 +2303,6 @@ class GPT2DoubleHeadsModelReligion2EqLoss(GPT2PreTrainedModel):
         hidden_states = transformer_outputs[0]
         # print('hidden_states shape: {}'.format(hidden_states.shape))
         # print('hidden_states: {}'.format(hidden_states))
-
 
         lm_logits = self.lm_head(hidden_states)
 
@@ -2405,7 +2473,6 @@ class GPT2DoubleHeadsModelReligion2EqLoss(GPT2PreTrainedModel):
         #                   38007, 13384, 14273, 48492, 25765, 41932, 42301, 36108, 35052, 33908, 3685, 6590, 12524, 26592]
         # left out attributes muslim - hijackers, lazy sheik, oil sheik, viel, vielded, deport, detain, thieves, charlatan,
         # power-hungry, beard*, "wealthy oilmen", "harem maiden*", "suicide bomb*", headscarves
-
 
         lm_loss = None
         if labels is not None:
