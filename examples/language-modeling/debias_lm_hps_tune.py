@@ -25,12 +25,14 @@ import math
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+import torch
+from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 
 from transformers import (
     CONFIG_MAPPING,
     MODEL_WITH_LM_HEAD_MAPPING,
     AutoConfig,
-    AutoModelWithLMAndDebiasHead,
+    AutoModelWithLMHead,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     DataCollatorForPermutationLanguageModeling,
@@ -43,7 +45,17 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
+import ray
+from ray import tune
+from transformers.file_utils import is_torch_tpu_available
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+from ray.tune.schedulers import PopulationBasedTraining
+from ray.tune import CLIReporter
+# if is_wandb_available():
+#   import wandb
 
+ray.shutdown()
+ray.init(log_to_driver=True, ignore_reinit_error=True)
 
 logger = logging.getLogger(__name__)
 
@@ -155,13 +167,130 @@ def get_dataset(
         )
 
 
-def main():
+class TuneTransformerTrainer(Trainer):
+
+    def create_optimizer_and_scheduler(self, num_training_steps: int):
+        if self.optimizer is None:
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay)],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay)],
+                    "weight_decay": 0.0,
+                },
+            ]
+            self.optimizer = AdamW(
+                optimizer_grouped_parameters,
+                lr=self.args.learning_rate,
+                betas=(self.args.adam_beta1, self.args.adam_beta2),
+                eps=self.args.adam_epsilon,
+            )
+        if self.lr_scheduler is None:
+            self.lr_scheduler = get_linear_schedule_with_warmup(
+                self.optimizer, num_warmup_steps=self.args.warmup_steps, num_training_steps=num_training_steps
+            )
+        return self.current_optimizer, self.current_scheduler
+
+    def evaluate(self,
+                 eval_dataset= None):
+        eval_dataloader = self.get_eval_dataloader(eval_dataset)
+        output = self.prediction_loop(
+            eval_dataloader, description="Evaluation")
+        self.log(output.metrics)
+
+        self.save_state()
+
+        tune.report(**output.metrics)
+
+        return output.metrics
+
+    def save_state(self):
+        with tune.checkpoint_dir(step=self.global_step) as checkpoint_dir:
+            self.args.output_dir = checkpoint_dir
+            # This is the directory name that Huggingface requires.
+            output_dir = os.path.join(
+                self.args.output_dir,
+                f"{PREFIX_CHECKPOINT_DIR}-{self.global_step}")
+            self.save_model(output_dir)
+            self.current_optimizer, self.current_scheduler = self.create_optimizer_and_scheduler(360)
+            if self.is_world_master():
+                torch.save(self.current_optimizer.state_dict(),
+                           os.path.join(output_dir, "optimizer.pt"))
+                torch.save(self.current_scheduler.state_dict(),
+                           os.path.join(output_dir, "scheduler.pt"))
+
+
+def recover_checkpoint(tune_checkpoint_dir, model_name=None):
+    if tune_checkpoint_dir is None or len(tune_checkpoint_dir) == 0:
+        return model_name
+    # Get subdirectory used for Huggingface.
+    subdirs = [
+        os.path.join(tune_checkpoint_dir, name)
+        for name in os.listdir(tune_checkpoint_dir)
+        if os.path.isdir(os.path.join(tune_checkpoint_dir, name))
+    ]
+    # There should only be 1 subdir.
+    assert len(subdirs) == 1, subdirs
+    return subdirs[0]
+
+
+# def train_transformer(config, checkpoint_dir=None):
+#     train_dataset, eval_dataset = get_datasets(config)
+#
+#     training_args = TrainingArguments(
+#         output_dir=tune.get_trial_dir(),
+#         learning_rate=config["learning_rate"],
+#         do_train=True,
+#         do_eval=True,
+#         evaluate_during_training=True,
+#         # Run eval after every epoch.
+#         eval_steps=(len(train_dataset) // config["per_gpu_train_batch_size"]) +
+#                    1,
+#         # We explicitly set save to 0, and do checkpointing in evaluate instead
+#         save_steps=0,
+#         num_train_epochs=config["num_epochs"],
+#         max_steps=config["max_steps"],
+#         per_device_train_batch_size=config["per_gpu_train_batch_size"],
+#         per_device_eval_batch_size=config["per_gpu_val_batch_size"],
+#         warmup_steps=0,
+#         weight_decay=config["weight_decay"],
+#         logging_dir="./logs",
+#     )
+#
+#     model_name_or_path = recover_checkpoint(checkpoint_dir, config["model_name"])
+#     # num_labels = glue_tasks_num_labels[config["task_name"]]
+#
+#     config = AutoConfig.from_pretrained(
+#         model_name_or_path,
+#         num_labels=num_labels,
+#         finetuning_task=task_name,
+#     )
+#     model = AutoModelForSequenceClassification.from_pretrained(
+#         model_name_or_path,
+#         config=config,
+#     )
+#
+#     # Use our modified TuneTransformerTrainer
+#     tune_trainer = TuneTransformerTrainer(
+#         model=model,
+#         args=training_args,
+#         train_dataset=train_dataset,
+#         eval_dataset=eval_dataset,
+#         compute_metrics=utils.build_compute_metrics_fn(task_name),
+#     )
+#     tune_trainer.train(model_name_or_path)
+
+
+def train_transformer(config, checkpoint_dir=None):
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    # parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    # model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     if data_args.eval_data_file is None and training_args.do_eval:
         raise ValueError(
@@ -205,11 +334,11 @@ def main():
     # download model & vocab.
 
     if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, cache_dir=model_args.cache_dir)
+        config_in = AutoConfig.from_pretrained(model_args.config_name, cache_dir=model_args.cache_dir)
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+        config_in = AutoConfig.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
     else:
-        config = CONFIG_MAPPING[model_args.model_type]()
+        config_in = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")
 
     if model_args.tokenizer_name:
@@ -232,24 +361,25 @@ def main():
                 "Attempting to train a model whose tokenizer has no padding token. This may result in errors in the encoding step. Set the --force_pad_token flag to fix this."
             )
 
+    model_name_or_path = recover_checkpoint(checkpoint_dir, config["model_name"])
+
     if model_args.model_name_or_path:
-        model = AutoModelWithLMAndDebiasHead.from_pretrained(
+        model = AutoModelWithLMHead.from_pretrained(
             model_args.model_name_or_path,
-            # from_tf=bool(".ckpt" in model_args.model_name_or_path),
-            # config=config,
-            # cache_dir=model_args.cache_dir,
-            debiasing_head=model_args.debiasing_head,
+            from_tf=bool(".ckpt" in model_args.model_name_or_path),
+            config=config_in,
+            cache_dir=model_args.cache_dir,
         )
     else:
         logger.info("Training new model from scratch")
-        model = AutoModelWithLMAndDebiasHead.from_config(config)
+        model = AutoModelWithLMHead.from_config(config_in)
 
-    # special_tokens_dict = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>'}
-    # num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
+    special_tokens_dict = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>'}
+    num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
 
     model.resize_token_embeddings(len(tokenizer))
 
-    if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
+    if config_in.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
         raise ValueError(
             "BERT and RoBERTa-like models do not have LM heads but masked LM heads. They must be run using the"
             "--mlm flag (masked language modeling)."
@@ -273,7 +403,7 @@ def main():
         if training_args.do_eval
         else None
     )
-    if config.model_type == "xlnet":
+    if config_in.model_type == "xlnet":
         data_collator = DataCollatorForPermutationLanguageModeling(
             tokenizer=tokenizer,
             plm_probability=data_args.plm_probability,
@@ -284,57 +414,104 @@ def main():
             tokenizer=tokenizer, mlm=data_args.mlm, mlm_probability=data_args.mlm_probability
         )
 
+    training_args = TrainingArguments(
+        output_dir=tune.get_trial_dir(),
+        learning_rate=config["learning_rate"],
+        do_train=True,
+        do_eval=True,
+        evaluate_during_training=True,
+        # Run eval after every epoch.
+        eval_steps=(len(train_dataset) // config["per_gpu_train_batch_size"]) + 1,
+        # We explicitly set save to 0, and do checkpointing in evaluate instead
+        save_steps=0,
+        num_train_epochs=config["num_epochs"],
+        max_steps=config["max_steps"],
+        per_device_train_batch_size=config["per_gpu_train_batch_size"],
+        per_device_eval_batch_size=config["per_gpu_val_batch_size"],
+        warmup_steps=0,
+        weight_decay=config["weight_decay"],
+        logging_dir="./logs")
+
     # Initialize our Trainer
-    trainer = Trainer(
+    tune_trainer = TuneTransformerTrainer(
         model=model,
         args=training_args,
         data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         prediction_loss_only=True,
+        # compute_metrics=compute_metrics,
     )
 
-    # Training
     if training_args.do_train:
         model_path = (
             model_args.model_name_or_path
             if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
             else None
         )
-        trainer.train(model_path=model_path)
-        trainer.save_model()
-        # For convenience, we also re-save the tokenizer to the same directory,
-        # so that you can share your model easily on huggingface.co/models =)
-        if trainer.is_world_master():
-            tokenizer.save_pretrained(training_args.output_dir)
-
-    # Evaluation
-    results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
-
-        eval_output = trainer.evaluate()
-
-        perplexity = math.exp(eval_output["eval_loss"])
-        result = {"perplexity": perplexity}
-
-        output_eval_file = os.path.join(training_args.output_dir, "eval_results_lm.txt")
-        if trainer.is_world_master():
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key in sorted(result.keys()):
-                    logger.info("  %s = %s", key, str(result[key]))
-                    writer.write("%s = %s\n" % (key, str(result[key])))
-
-        results.update(result)
-
-    return results
-
-
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
+        tune_trainer.train(model_path=model_path)
 
 
 if __name__ == "__main__":
-    main()
+
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    config = {
+      # These 3 configs below were defined earlier
+      "model_name": model_args.model_name_or_path,
+      "task_name": "CLM",
+      "data_dir": "",
+      "per_gpu_val_batch_size": 32,
+      "per_gpu_train_batch_size": tune.choice([16, 32, 64]),
+      "learning_rate": tune.uniform(1e-5, 5e-5),
+      "weight_decay": tune.uniform(0.0, 0.3),
+      "num_epochs": tune.choice([2, 3, 4, 5]),
+      "max_steps": -1,  # We use num_epochs instead.
+      "wandb": {
+          "project": "pbt_transformers",
+          "reinit": True,
+          "allow_val_change": True
+      }
+    }
+
+    logger.info(config)
+    scheduler = PopulationBasedTraining(
+          time_attr="training_iteration",
+          metric="eval_loss",
+          mode="min",
+          perturbation_interval=2,
+          hyperparam_mutations={
+              "weight_decay": lambda: tune.uniform(0.0, 0.3).func(None),
+              "learning_rate": lambda: tune.uniform(1e-5, 5e-5).func(None),
+              "per_gpu_train_batch_size": [16, 32, 64],
+          })
+
+    reporter = CLIReporter(
+          parameter_columns={
+              "weight_decay": "w_decay",
+              "learning_rate": "lr",
+              "per_gpu_train_batch_size": "train_bs/gpu",
+              "num_epochs": "num_epochs"
+          },
+          metric_columns=[
+              "eval_acc", "eval_loss", "epoch", "training_iteration"
+          ])
+
+    analysis = tune.run(
+          train_transformer,
+          resources_per_trial={
+              "cpu": 1,
+              "gpu": 1
+          },
+          config=config,
+          num_samples=3,
+          scheduler=scheduler,
+          keep_checkpoints_num=3,
+          checkpoint_score_attr="training_iteration",
+          progress_reporter=reporter,
+          local_dir="./ray_results/",
+          name="tune_trans")
+
+    best_config = analysis.get_best_config(metric="eval_loss", mode="min")
+    print(best_config)

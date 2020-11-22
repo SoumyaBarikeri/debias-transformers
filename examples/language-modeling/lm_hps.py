@@ -30,12 +30,11 @@ from transformers import (
     CONFIG_MAPPING,
     MODEL_WITH_LM_HEAD_MAPPING,
     AutoConfig,
-    AutoModelWithLMAndDebiasHead,
+    AutoModelWithLMHead,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     DataCollatorForPermutationLanguageModeling,
     HfArgumentParser,
-    # LineByLineTextDatasetLabels,
     LineByLineTextDataset,
     PreTrainedTokenizer,
     TextDataset,
@@ -79,12 +78,7 @@ class ModelArguments:
     )
     force_pad_token: bool = field(
         default=False,
-        metadata={
-            "help": "Whether to force the addition of a padding token to tokenizer that does not already have one."
-        },
-    )
-    debiasing_head: Optional[str] = field(
-        default=None, metadata={"help": "The type of de-biasing head to be used"}
+        metadata={"help": "Whether to force the addition of a padding token to tokenizer that does not already have one."},
     )
 
 
@@ -144,7 +138,6 @@ def get_dataset(
     file_path = args.eval_data_file if evaluate else args.train_data_file
     if args.line_by_line:
         return LineByLineTextDataset(tokenizer=tokenizer, file_path=file_path, block_size=args.block_size)
-        # return LineByLineTextDatasetLabels(tokenizer=tokenizer, file_path=file_path, block_size=args.block_size)
     else:
         return TextDataset(
             tokenizer=tokenizer,
@@ -232,22 +225,33 @@ def main():
                 "Attempting to train a model whose tokenizer has no padding token. This may result in errors in the encoding step. Set the --force_pad_token flag to fix this."
             )
 
-    if model_args.model_name_or_path:
-        model = AutoModelWithLMAndDebiasHead.from_pretrained(
-            model_args.model_name_or_path,
-            # from_tf=bool(".ckpt" in model_args.model_name_or_path),
-            # config=config,
-            # cache_dir=model_args.cache_dir,
-            debiasing_head=model_args.debiasing_head,
-        )
-    else:
-        logger.info("Training new model from scratch")
-        model = AutoModelWithLMAndDebiasHead.from_config(config)
+    #if model_args.model_name_or_path:
+    #    model = AutoModelWithLMHead.from_pretrained(
+    #        model_args.model_name_or_path,
+    #        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+    #        config=config,
+    #        cache_dir=model_args.cache_dir,
+    #    )
+    #else:
+    #    logger.info("Training new model from scratch")
+    #    model = AutoModelWithLMHead.from_config(config)
 
     # special_tokens_dict = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>'}
     # num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
+    #
+   #  model.resize_token_embeddings(len(tokenizer))
 
-    model.resize_token_embeddings(len(tokenizer))
+    def model_init():
+        model1 = AutoModelWithLMHead.from_pretrained(
+            model_args.model_name_or_path,
+        #    from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        #    config=config,
+        #    cache_dir=model_args.cache_dir,
+        )
+        # special_tokens_dict1 = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>'}
+        # num_added_toks1 = tokenizer.add_special_tokens(special_tokens_dict1)
+        model1.resize_token_embeddings(len(tokenizer))
+        return model1
 
     if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
         raise ValueError(
@@ -266,8 +270,6 @@ def main():
     train_dataset = (
         get_dataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
     )
-    # print('train_dataset {}'.format(train_dataset.examples[0]))
-
     eval_dataset = (
         get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir)
         if training_args.do_eval
@@ -284,9 +286,14 @@ def main():
             tokenizer=tokenizer, mlm=data_args.mlm, mlm_probability=data_args.mlm_probability
         )
 
+    def my_objective(metrics):
+        # Your elaborate computation here
+        e_loss = metrics["eval_loss"]
+        return e_loss
+
     # Initialize our Trainer
     trainer = Trainer(
-        model=model,
+        model_init=model_init,
         args=training_args,
         data_collator=data_collator,
         train_dataset=train_dataset,
@@ -301,8 +308,14 @@ def main():
             if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
             else None
         )
-        trainer.train(model_path=model_path)
-        trainer.save_model()
+
+        best_hyp = trainer.hyperparameter_search(direction="minimize", backend="ray", n_trials=6, n_jobs=2,
+                                                 compute_objective=my_objective) # number of trials
+                                      #  n_jobs=2  # number of parallel jobs, if multiple GPUs
+
+        print(best_hyp)
+        # trainer.train(model_path=model_path)
+        # trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
@@ -310,23 +323,23 @@ def main():
 
     # Evaluation
     results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
+    #if training_args.do_eval:
+    #    logger.info("*** Evaluate ***")
+    #
+    #    eval_output = trainer.evaluate()
+    
+    #    perplexity = math.exp(eval_output["eval_loss"])
+    #    result = {"perplexity": perplexity}
 
-        eval_output = trainer.evaluate()
+     #   output_eval_file = os.path.join(training_args.output_dir, "eval_results_lm.txt")
+     #   if trainer.is_world_master():
+     #       with open(output_eval_file, "w") as writer:
+     #           logger.info("***** Eval results *****")
+     #           for key in sorted(result.keys()):
+     #               logger.info("  %s = %s", key, str(result[key]))
+     #               writer.write("%s = %s\n" % (key, str(result[key])))
 
-        perplexity = math.exp(eval_output["eval_loss"])
-        result = {"perplexity": perplexity}
-
-        output_eval_file = os.path.join(training_args.output_dir, "eval_results_lm.txt")
-        if trainer.is_world_master():
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key in sorted(result.keys()):
-                    logger.info("  %s = %s", key, str(result[key]))
-                    writer.write("%s = %s\n" % (key, str(result[key])))
-
-        results.update(result)
+     #   results.update(result)
 
     return results
 
