@@ -1054,7 +1054,6 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
         # print('hidden_states: {}'.format(hidden_states))
 
         lm_logits = self.lm_head(hidden_states)
-        mc_logits = self.multiple_choice_head(hidden_states, mc_token_ids).squeeze(-1)
 
         debias_loss_total = torch.tensor(0)
         # print('lm_logits {}'.format(lm_logits.shape))
@@ -1082,8 +1081,8 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
             #  ['Ġgirlfriend', 'Ġboyfriend'], ['Ġfemales', 'Ġmales'], ['Ġwives', 'Ġhusbands'], ['Ġaunt', 'Ġuncle'],
             #  ['Ġsisters', 'Ġbrothers'], ['Ġsister', 'Ġbrother'], ['Ġshe', 'Ġhe'], ['Ġgirlfriends', 'Ġboyfriend']]
             # ignored - madam, stepdaughter, hostess,
-            [['Ġblacks', 'Ġwhites'], ['Ġaf', 'Ġameric'], ['Ġblack', 'Ġwhite'], ['Ġnegro', 'aucas'], ['black', 'white'],
-             ['bl', 'wh'], ['af', 'amer'], ['neg', 'aucas']]
+            # [['Ġblacks', 'Ġwhites'], ['Ġaf', 'Ġameric'], ['Ġblack', 'Ġwhite'], ['Ġnegro', 'aucas'], ['black', 'white'],
+            #  ['bl', 'wh'], ['af', 'amer'], ['neg', 'aucas']]
 
             if demographic == 'religion1':
                 # target_ids_list = [[12711, 4302], [6771, 9316], [26976, 13624], [5582, 4302], [23119, 20298],
@@ -1112,11 +1111,16 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
             target_ids_list = target_ids_list.to(self.device)
 
             make_mask = labels.clone()
+            # print('make_mask {}'.format(make_mask))
             make_mask[make_mask > 0] = 1
             make_mask[make_mask < 0] = 0
+            # print('make_mask {}'.format(make_mask))
 
             remove_pad_mask = make_mask.unsqueeze(-1).expand(hidden_states.size())
+            # print('remove_pad_mask {}'.format(remove_pad_mask))
+
             hidden_states_no_pad_token = hidden_states * remove_pad_mask
+            # print('hidden_states_no_pad_token {}'.format(hidden_states_no_pad_token))
 
             if target_pair_type == 'per_sent_targets':
                 for i, input_id in enumerate(input_ids):
@@ -1200,8 +1204,8 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
             loss_fct = CrossEntropyLoss()
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-        print('total eq debias_loss is {}'.format(debias_loss_total))
-        print('lm loss {}'.format(lm_loss))
+        # print('total eq debias_loss is {}'.format(debias_loss_total))
+        # print('lm loss {}'.format(lm_loss))
 
         total_loss = None
         if debias_loss_total:
@@ -1209,7 +1213,7 @@ class GPT2DoubleHeadsModelEqualisingLoss(GPT2PreTrainedModel):
         else:
             # This loss is used for evaluation
             total_loss = lm_loss
-        print('total loss {}'.format(total_loss))
+        # print('total loss {}'.format(total_loss))
         # if not return_dict:
         output = (lm_logits,) + transformer_outputs[1:]
 
@@ -1339,7 +1343,6 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
             if embedding_type == 'input':
                 all_input_embeds = self.transformer.get_input_embeddings()  # uncomment incase of input embed
             elif embedding_type == 'output':
-                print(embedding_type)
                 all_output_embeds = self.lm_head.weight.data
             else:
                 raise ValueError('Please specify valid embedding type - input or output')
@@ -1394,8 +1397,21 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
                                   [21120, 0, 0], [1363, 12, 6651], [19518, 0, 0], [1242, 0, 0], [9280, 0, 0],
                                   [9285, 0, 0], [5337, 0, 0], [5659, 23021, 0], [10512, 0, 0], [26924, 0, 0],
                                   [22197, 0, 0]]
+            elif demographic == 'race':
+                target_ids_list = [[15102, 13216], [6580, 45630], [2042, 2330], [47255, 25205], [13424, 11186],
+                                   [2436, 1929], [1878, 2382], [12480, 25205]]
+                attribute_list = [[6590, 0, 0], [5076, 0, 0], [7014, 0, 0], [1226, 400, 0], [5123, 0, 0], [26359, 0, 0],
+                                  [5778, 0, 0], [1918, 0, 0], [18522, 0, 0], [8764, 0, 0], [48305, 0, 0], [4641, 0, 0],
+                                  [9336, 0, 0], [13763, 0, 0], [3278, 1133, 0], [13574, 0, 0], [13609, 0, 0],
+                                  [7356, 0, 0], [8098, 0, 0], [13400, 0, 0], [1494, 0, 0], [36371, 0, 0], [44542, 0, 0],
+                                  [35358, 0, 0], [3770, 0, 0], [7818, 0, 0], [12361, 0, 0], [17166, 0, 0], [6181, 0, 0],
+                                  [1175, 0, 0], [12659, 0, 0], [5287, 0, 0], [11778, 0, 0], [4301, 0, 0], [10463, 0, 0],
+                                  [739, 4871, 0], [2563, 16456, 0], [4591, 2464, 1143], [8361, 0, 0], [625, 8044, 276],
+                                  [8469, 19678, 0], [5044, 2569, 0], [4923, 0, 0], [1342, 12661, 0], [30135, 0, 0],
+                                  [7711, 272, 0], [7812, 0, 0], [2563, 19678, 0], [16931, 0, 0], [19528, 0, 0],
+                                  [6478, 88, 0], [1182, 11576, 0], [8718, 3206, 0]]
             else:
-                raise ValueError('Please specify valid demographic - religion1, religion2, orientation or gender')
+                raise ValueError('Please specify valid demographic - religion1, religion2, orientation, race or gender')
 
             target_ids_list = torch.tensor(target_ids_list)
             target_ids_list = target_ids_list.to(self.device)
@@ -1441,8 +1457,8 @@ class GPT2DoubleHeadsModelCosineDistLoss(GPT2PreTrainedModel):
             loss_fct = CrossEntropyLoss()
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-        print('cos debias_loss {} in custom loss fn'.format(debias_loss_total))
-        print('lm loss {}'.format(lm_loss))
+        # print('cos debias_loss {} in custom loss fn'.format(debias_loss_total))
+        # print('lm loss {}'.format(lm_loss))
 
         total_loss = None
         if debias_loss_total:
@@ -2000,6 +2016,19 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
                                   [12724, 0, 0], [44511, 0, 0], [25920, 0, 0], [1200, 12, 6651], [16307, 396, 0],
                                   [21120, 0, 0], [1363, 12, 6651], [19518, 0, 0], [1242, 0, 0], [9280, 0, 0],
                                   [9285, 0, 0], [5337, 0, 0], [5659, 23021, 0], [10512, 0, 0], [26924, 0, 0], [22197, 0, 0]]
+            elif demographic == 'race':
+                target_ids_list = [[15102, 13216], [6580, 45630], [2042, 2330], [47255, 25205], [13424, 11186],
+                                   [2436, 1929], [1878, 2382], [12480, 25205]]
+                attribute_list = [[6590, 0, 0], [5076, 0, 0], [7014, 0, 0], [1226, 400, 0], [5123, 0, 0], [26359, 0, 0],
+                                  [5778, 0, 0], [1918, 0, 0], [18522, 0, 0], [8764, 0, 0], [48305, 0, 0], [4641, 0, 0],
+                                  [9336, 0, 0], [13763, 0, 0], [3278, 1133, 0], [13574, 0, 0], [13609, 0, 0],
+                                  [7356, 0, 0], [8098, 0, 0], [13400, 0, 0], [1494, 0, 0], [36371, 0, 0], [44542, 0, 0],
+                                  [35358, 0, 0], [3770, 0, 0], [7818, 0, 0], [12361, 0, 0], [17166, 0, 0], [6181, 0, 0],
+                                  [1175, 0, 0], [12659, 0, 0], [5287, 0, 0], [11778, 0, 0], [4301, 0, 0], [10463, 0, 0],
+                                  [739, 4871, 0], [2563, 16456, 0], [4591, 2464, 1143], [8361, 0, 0], [625, 8044, 276],
+                                  [8469, 19678, 0], [5044, 2569, 0], [4923, 0, 0], [1342, 12661, 0], [30135, 0, 0],
+                                  [7711, 272, 0], [7812, 0, 0], [2563, 19678, 0], [16931, 0, 0], [19528, 0, 0],
+                                  [6478, 88, 0], [1182, 11576, 0], [8718, 3206, 0]]
             else:
                 raise ValueError('Please specify valid demographic - religion1, religion2, orientation, gender')
 
@@ -2014,6 +2043,7 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
             diff_matrix = torch.zeros((target_ids_list.size(0), 768))
             diff_matrix = diff_matrix.to(self.device)
 
+            # create matrix over union of target pair difference in embeddings
             for i, target_pair in enumerate(target_ids_list):
                 j_w = lm_head_weights[target_pair[0]]
                 c_w = lm_head_weights[target_pair[1]]
@@ -2024,6 +2054,7 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
             s_2_sum = torch.sum(torch.square(s))
             s_total = torch.tensor(0.0)
 
+            # Keep columns of V that most represent bias space
             for k_i, s_i in enumerate(s):
                 s_total = s_total + torch.square(s_i)
                 if s_total > 0.5 * s_2_sum:
@@ -2065,13 +2096,13 @@ class GPT2DoubleHeadsModelHardDebiasing(GPT2PreTrainedModel):
             loss_fct = CrossEntropyLoss()
             lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 
-        print('lm loss {}'.format(lm_loss))
+        # print('lm loss {}'.format(lm_loss))
         if hd_loss_total:
-            print('Hd loss {}'.format(hd_loss_total))
+            # print('Hd loss {}'.format(hd_loss_total))
             lm_loss_total = lm_hyp * lm_loss + debias_hyp * hd_loss_total
         else:
             lm_loss_total = lm_loss
-        print('lm loss in hard debias {}'.format(lm_loss_total))
+        # print('lm loss in hard debias {}'.format(lm_loss_total))
 
         if not return_dict:
             output = (lm_logits,) + transformer_outputs[1:]

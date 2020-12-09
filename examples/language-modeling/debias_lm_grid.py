@@ -195,7 +195,7 @@ def get_dataset(
         )
 
 
-class TrainerCustomLoss(Trainer):
+class TrainerGrid(Trainer):
 
     def prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None
@@ -279,7 +279,7 @@ class TrainerCustomLoss(Trainer):
                 loss_all_list = distributed_concat(loss_all_list, num_total_examples=self.num_examples(dataloader))
 
         print('local rank {}'.format(self.args.local_rank))
-        # Finally, turn the aggregated tensors into numpy arrays.
+             # Finally, turn the aggregated tensors into numpy arrays.
         if preds is not None:
             preds = nested_numpify(preds)
         if label_ids is not None:
@@ -442,159 +442,130 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    params = {"per_device_train_batch_size": [4, 8, 16],
+              "per_device_eval_batch_size": [1],
+              "gradient_accumulation_steps": [1, 5, 8],
+              "lm_hyp": [0.001, 0.01],
+              "debias_hyp": [10, 50, 100]}
 
-    if data_args.eval_data_file is None and training_args.do_eval:
-        raise ValueError(
-            "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
-            "or remove the --do_eval argument."
-        )
+    grid = ParameterGrid(params)
+    best_p_val = 0
+    best_t_val = 0
+    best_params = {}
 
-    if (
-        os.path.exists(training_args.output_dir)
-        and os.listdir(training_args.output_dir)
-        and training_args.do_train
-        and not training_args.overwrite_output_dir
-    ):
-        raise ValueError(
-            f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
-        )
+    sign_results = []
 
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN,
-    )
-    logger.warning(
-        "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
-        training_args.local_rank,
-        training_args.device,
-        training_args.n_gpu,
-        bool(training_args.local_rank != -1),
-        training_args.fp16,
-    )
-    logger.info("Training/evaluation parameters %s", training_args)
+    for comb in grid:
 
-    # Set seed
-    set_seed(training_args.seed)
+        sign_dict = {}
+        parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Load pretrained model and tokenizer
-    #
-    # Distributed training:
-    # The .from_pretrained methods guarantee that only one local process can concurrently
-    # download model & vocab.
-
-    if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, cache_dir=model_args.cache_dir)
-    elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    else:
-        config = CONFIG_MAPPING[model_args.model_type]()
-        logger.warning("You are instantiating a new config instance from scratch.")
-
-    if model_args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, cache_dir=model_args.cache_dir)
-    elif model_args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
-    else:
-        raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported, but you can do it from another script, save it,"
-            "and load it from here, using --tokenizer_name"
-        )
-    if tokenizer.pad_token_id is None:
-        if model_args.force_pad_token:
-            # See PR 3388. Some tokenizers don't had pad tokens which causes errors at the encoding step in the collate_fn.
-            # We give here the option to force the addition of a pad token. The attention mask is used to ignore this token
-            # when feeding to the model.x
-            tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        else:
-            logger.warning(
-                "Attempting to train a model whose tokenizer has no padding token. This may result in errors in the encoding step. Set the --force_pad_token flag to fix this."
+        if data_args.eval_data_file is None and training_args.do_eval:
+            raise ValueError(
+                "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
+                "or remove the --do_eval argument."
             )
 
-    pad_token_id = tokenizer.pad_token_id
+        if (
+                os.path.exists(training_args.output_dir)
+                and os.listdir(training_args.output_dir)
+                and training_args.do_train
+                and not training_args.overwrite_output_dir
+        ):
+            raise ValueError(
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
+            )
 
-    if model_args.model_name_or_path:
-        model = AutoModelWithLMAndDebiasHead.from_pretrained(
-            model_args.model_name_or_path,
-            # from_tf=bool(".ckpt" in model_args.model_name_or_path),
-            config=config,
-            # cache_dir=model_args.cache_dir,
-            debiasing_head=model_args.debiasing_head,
+        # Setup logging
+        logging.basicConfig(
+            format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+            datefmt="%m/%d/%Y %H:%M:%S",
+            level=logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN,
         )
-    else:
-        logger.info("Training new model from scratch")
-        model = AutoModelWithLMAndDebiasHead.from_config(config)
-
-    # special_tokens_dict = {'bos_token': '<bos>', 'eos_token': '<eos>', 'pad_token': '<pad>'}
-    # num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
-
-    model.resize_token_embeddings(len(tokenizer))
-
-    if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
-        raise ValueError(
-            "BERT and RoBERTa-like models do not have LM heads but masked LM heads. They must be run using the"
-            "--mlm flag (masked language modeling)."
+        logger.warning(
+            "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
+            training_args.local_rank,
+            training_args.device,
+            training_args.n_gpu,
+            bool(training_args.local_rank != -1),
+            training_args.fp16,
         )
+        logger.info("Training/evaluation parameters %s", training_args)
 
-    if data_args.block_size <= 0:
-        data_args.block_size = tokenizer.max_len
-        # Our input block size will be the max possible for the model
-    else:
-        data_args.block_size = min(data_args.block_size, tokenizer.max_len)
+        # Set seed
+        set_seed(training_args.seed)
 
-    # Get datasets
+        # Load pretrained model and tokenizer
+        #
+        # Distributed training:
+        # The .from_pretrained methods guarantee that only one local process can concurrently
+        # download model & vocab.
 
-    train_dataset = (
-        get_dataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
-    )
-    # print('train_dataset {}'.format(train_dataset.examples[0]))
+        if model_args.config_name:
+            config = AutoConfig.from_pretrained(model_args.config_name, cache_dir=model_args.cache_dir)
+        elif model_args.model_name_or_path:
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+        else:
+            config = CONFIG_MAPPING[model_args.model_type]()
+            logger.warning("You are instantiating a new config instance from scratch.")
 
-    eval_dataset = (
-        get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir)
-        if training_args.do_eval
-        else None
-    )
-    if config.model_type == "xlnet":
-        data_collator = DataCollatorForPermutationLanguageModeling(
-            tokenizer=tokenizer,
-            plm_probability=data_args.plm_probability,
-            max_span_length=data_args.max_span_length,
+        if model_args.tokenizer_name:
+            tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, cache_dir=model_args.cache_dir)
+        elif model_args.model_name_or_path:
+            tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+        else:
+            raise ValueError(
+                "You are instantiating a new tokenizer from scratch. This is not supported, but you can do it from another script, save it,"
+                "and load it from here, using --tokenizer_name"
+            )
+        if tokenizer.pad_token_id is None:
+            if model_args.force_pad_token:
+                # See PR 3388. Some tokenizers don't had pad tokens which causes errors at the encoding step in the collate_fn.
+                # We give here the option to force the addition of a pad token. The attention mask is used to ignore this token
+                # when feeding to the model.x
+                tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            else:
+                logger.warning(
+                    "Attempting to train a model whose tokenizer has no padding token. This may result in errors in the encoding step. Set the --force_pad_token flag to fix this."
+                )
+        pad_token_id = tokenizer.pad_token_id
+
+        if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
+            raise ValueError(
+                "BERT and RoBERTa-like models do not have LM heads but masked LM heads. They must be run using the"
+                "--mlm flag (masked language modeling)."
+            )
+
+        if data_args.block_size <= 0:
+            data_args.block_size = tokenizer.max_len
+            # Our input block size will be the max possible for the model
+        else:
+            data_args.block_size = min(data_args.block_size, tokenizer.max_len)
+
+        if config.model_type == "xlnet":
+            data_collator = DataCollatorForPermutationLanguageModeling(
+                tokenizer=tokenizer,
+                plm_probability=data_args.plm_probability,
+                max_span_length=data_args.max_span_length,
+            )
+        else:
+            data_collator = DataCollatorForLanguageModeling(
+                tokenizer=tokenizer, mlm=data_args.mlm, mlm_probability=data_args.mlm_probability
+            )
+        # Get datasets
+
+        train_dataset = (
+            get_dataset(data_args, tokenizer=tokenizer,
+                        cache_dir=model_args.cache_dir) if training_args.do_train else None
         )
-    else:
-        data_collator = DataCollatorForLanguageModeling(
-            tokenizer=tokenizer, mlm=data_args.mlm, mlm_probability=data_args.mlm_probability
-        )
+        # print('train_dataset {}'.format(train_dataset.examples[0]))
 
-    # Initialize our Trainer
-    trainer = TrainerCustomLoss(
-        model=model,
-        args=training_args,
-        data_collator=data_collator,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        prediction_loss_only=True,
-    )
-
-    # Training
-    if training_args.do_train:
-        model_path = (
-            model_args.model_name_or_path
-            if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
+        eval_dataset = (
+            get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir)
+            if training_args.do_eval
             else None
         )
-        trainer.train(model_path=model_path)
-        trainer.save_model()
-        # For convenience, we also re-save the tokenizer to the same directory,
-        # so that you can share your model easily on huggingface.co/models =)
-        if trainer.is_world_master():
-            tokenizer.save_pretrained(training_args.output_dir)
-
-    # Evaluation
-    results = {}
-    if training_args.do_eval:
 
         demo1_validset = (
             get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir,
@@ -605,15 +576,51 @@ def main():
                         demo_file=data_args.demo2_valid)
         )
 
-        demo1_testset = (
-            get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir,
-                        demo_file=data_args.demo1_test)
+        for arg, value in comb.items():
+            # print(arg, value)
+            setattr(training_args, arg, value)
+
+        print('Changed hyper-parameters {}, {}, {}, {}, {}'.format(training_args.debias_hyp, training_args.lm_hyp,
+                                                                   training_args.gradient_accumulation_steps,
+                                                                   training_args.per_device_train_batch_size,
+                                                                   training_args.per_device_eval_batch_size))
+
+        if model_args.model_name_or_path:
+            model = AutoModelWithLMAndDebiasHead.from_pretrained(
+                model_args.model_name_or_path,
+                # from_tf=bool(".ckpt" in model_args.model_name_or_path),
+                config=config,
+                # cache_dir=model_args.cache_dir,
+                debiasing_head=model_args.debiasing_head,
+            )
+        else:
+            logger.info("Training new model from scratch")
+            model = AutoModelWithLMAndDebiasHead.from_config(config)
+
+        model.resize_token_embeddings(len(tokenizer))
+
+        # for n, p in model.named_parameters():
+        #     print('model params {}, {}'.format(n, p))
+
+        # Initialize our Trainer
+        trainer = TrainerGrid(
+            model=model,
+            args=training_args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            prediction_loss_only=True,
         )
-        demo2_testset = (
-            get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir,
-                        demo_file=data_args.demo2_test)
-        )
-        logger.info("*** Evaluate ***")
+
+        # Training
+        if training_args.do_train:
+            model_path = (
+                model_args.model_name_or_path
+                if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
+                else None
+            )
+
+            trainer.train(model_path=model_path)
 
         demo1_losses = trainer.evaluate(demo1_validset)
         demo2_losses = trainer.evaluate(demo2_validset)
@@ -623,11 +630,171 @@ def main():
         demo2_l = demo2_losses["eval_all_losses"].clone().detach()
         demo1_perp = torch.exp(demo1_l)
         demo2_perp = torch.exp(demo2_l)
-        t_paired_valid, p_paired_valid = stats.ttest_rel(demo1_perp.cpu().detach().numpy(),
-                                                         demo2_perp.cpu().detach().numpy())
+        t_paired, p_paired = stats.ttest_rel(demo1_perp.cpu().detach().numpy(),
+                                             demo2_perp.cpu().detach().numpy())
 
-        print('***** t-val = {} and p-val = {} on validation set *****'.format(t_paired_valid, p_paired_valid))
+        print('***** t-val = {} and p-val = {} on validation set for combination of hyp {} *****'.format(t_paired,
+                                                                                                         p_paired, comb))
+        sign_dict['t_val'] = t_paired
+        sign_dict['p_val'] = p_paired
+        sign_dict['params'] = comb
 
+        sign_results.append(sign_dict)
+
+        if p_paired > best_p_val:
+            best_p_val = p_paired
+            best_params = comb
+            best_t_val = t_paired
+
+    print('***** t values and p values for different hyper-parameter combinations {} *****'.format(sign_results))
+    print('***** After grid search the best t_value = {}, p_value = {} for param combination {} *****'.format(
+        best_t_val, best_p_val, best_params))
+
+    # Evaluation with best model
+    results = {}
+    if training_args.do_eval:
+
+        if data_args.eval_data_file is None and training_args.do_eval:
+            raise ValueError(
+                "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
+                "or remove the --do_eval argument."
+            )
+
+        if (
+                os.path.exists(training_args.output_dir)
+                and os.listdir(training_args.output_dir)
+                and training_args.do_train
+                and not training_args.overwrite_output_dir
+        ):
+            raise ValueError(
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
+            )
+
+        # Setup logging
+        logging.basicConfig(
+            format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+            datefmt="%m/%d/%Y %H:%M:%S",
+            level=logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN,
+        )
+        logger.warning(
+            "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
+            training_args.local_rank,
+            training_args.device,
+            training_args.n_gpu,
+            bool(training_args.local_rank != -1),
+            training_args.fp16,
+        )
+        logger.info("Training/evaluation parameters %s", training_args)
+
+        # Set seed
+        set_seed(training_args.seed)
+
+        # Load pretrained model and tokenizer
+        #
+        # Distributed training:
+        # The .from_pretrained methods guarantee that only one local process can concurrently
+        # download model & vocab.
+
+        if model_args.config_name:
+            config = AutoConfig.from_pretrained(model_args.config_name, cache_dir=model_args.cache_dir)
+        elif model_args.model_name_or_path:
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+        else:
+            config = CONFIG_MAPPING[model_args.model_type]()
+            logger.warning("You are instantiating a new config instance from scratch.")
+
+        if model_args.tokenizer_name:
+            tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, cache_dir=model_args.cache_dir)
+        elif model_args.model_name_or_path:
+            tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=model_args.cache_dir)
+        else:
+            raise ValueError(
+                "You are instantiating a new tokenizer from scratch. This is not supported, but you can do it from another script, save it,"
+                "and load it from here, using --tokenizer_name"
+            )
+        if tokenizer.pad_token_id is None:
+            if model_args.force_pad_token:
+                # See PR 3388. Some tokenizers don't had pad tokens which causes errors at the encoding step in the collate_fn.
+                # We give here the option to force the addition of a pad token. The attention mask is used to ignore this token
+                # when feeding to the model.x
+                tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            else:
+                logger.warning(
+                    "Attempting to train a model whose tokenizer has no padding token. This may result in errors in the encoding step. Set the --force_pad_token flag to fix this."
+                )
+        pad_token_id = tokenizer.pad_token_id
+
+        if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
+            raise ValueError(
+                "BERT and RoBERTa-like models do not have LM heads but masked LM heads. They must be run using the"
+                "--mlm flag (masked language modeling)."
+            )
+
+        if data_args.block_size <= 0:
+            data_args.block_size = tokenizer.max_len
+            # Our input block size will be the max possible for the model
+        else:
+            data_args.block_size = min(data_args.block_size, tokenizer.max_len)
+
+        if config.model_type == "xlnet":
+            data_collator = DataCollatorForPermutationLanguageModeling(
+                tokenizer=tokenizer,
+                plm_probability=data_args.plm_probability,
+                max_span_length=data_args.max_span_length,
+            )
+        else:
+            data_collator = DataCollatorForLanguageModeling(
+                tokenizer=tokenizer, mlm=data_args.mlm, mlm_probability=data_args.mlm_probability
+            )
+
+        demo1_testset = (
+            get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir,
+                        demo_file=data_args.demo1_test)
+        )
+        demo2_testset = (
+            get_dataset(data_args, tokenizer=tokenizer, evaluate=True, cache_dir=model_args.cache_dir,
+                        demo_file=data_args.demo2_test)
+        )
+
+        for arg_name, arg_val in best_params.items():
+            print(arg_name, arg_val)
+            setattr(training_args, arg_name, arg_val)
+
+        model = AutoModelWithLMAndDebiasHead.from_pretrained(
+                    model_args.model_name_or_path,
+                    # from_tf=bool(".ckpt" in model_args.model_name_or_path),
+                    config=config,
+                    # cache_dir=model_args.cache_dir,
+                    debiasing_head=model_args.debiasing_head,
+                )
+
+        model.resize_token_embeddings(len(tokenizer))
+
+        trainer = TrainerGrid(
+            model=model,
+            args=training_args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            prediction_loss_only=True,
+        )
+
+        # Training
+        if training_args.do_train:
+            model_path = (
+                model_args.model_name_or_path
+                if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
+                else None
+            )
+
+        print('Training best model...')
+        trainer.train(model_path=model_path)
+        print('Saving best model...')
+        trainer.save_model()
+        if trainer.is_world_master():
+            tokenizer.save_pretrained(training_args.output_dir)
+
+        # Evaluate bias over test set
         demo1_losses = trainer.evaluate(demo1_testset)
         demo2_losses = trainer.evaluate(demo2_testset)
         # print('output loss 1 {}'.format(eval_op_1))
@@ -639,22 +806,26 @@ def main():
         t_paired_test, p_paired_test = stats.ttest_rel(demo1_perp.cpu().detach().numpy(),
                                                        demo2_perp.cpu().detach().numpy())
 
-        print('***** t-val={} and p-val={} on test-set *****'.format(t_paired_test, p_paired_test))
+        print('***** t-val={} and p-val={} on test-set for combination of hyp {} *****'.format(t_paired, p_paired,
+                                                                                               best_params))
+        logger.info("*** Evaluate for perplexity on Human reference set ***")
 
         eval_output = trainer.evaluate()
 
         perplexity = math.exp(eval_output["eval_loss"])
         result = {"perplexity on 6k Human reference test": perplexity, "Significance on valid set(t-val, p-val)":
-                  {"t-val": t_paired_valid, "p-val": p_paired_valid}, "Significance on test set(t-val, p-val)":
+                  {"t-val": best_t_val, "p-val": best_p_val}, "Significance on test set(t-val, p-val)":
                   {"t-val": t_paired_test, "p-val": p_paired_test}}
 
         output_eval_file = os.path.join(training_args.output_dir, "eval_results_lm.txt")
         if trainer.is_world_master():
             with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                writer.write("Training arguments: %s " % training_args)
-                for key in result.keys():
+                writer.write("***** Significance test results *****")
+                writer.write("Significance results: %s \n" % str(sign_results))
+                writer.write("Best Training arguments: %s \n" % training_args)
+                for key in sorted(result.keys()):
                     logger.info("  %s = %s", key, str(result[key]))
+                    logger.info("***** Eval results *****")
                     writer.write("%s = %s\n" % (key, str(result[key])))
 
         results.update(result)

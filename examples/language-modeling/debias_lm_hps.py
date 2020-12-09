@@ -201,6 +201,7 @@ def get_dataset(
 
 class TrainerHps(Trainer):
 
+    # do not override init method of parent, hence not calling super init here
     def prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None
     ) -> PredictionOutput:
