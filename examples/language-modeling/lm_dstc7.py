@@ -177,7 +177,8 @@ class ConvoDataset(Dataset):
             convos = [line for line in f.read().splitlines() if (len(line) > 0 and not line.isspace())]
 
         end_of_text_id = tokenizer.encoder[END_OF_TEXT_TOKEN]
-        max_seq_length = 40
+        # max_seq_length = 40, 128
+        max_seq_length = 128
 
         self.examples = []
         for line in convos:
@@ -468,9 +469,11 @@ class Dstc7Trainer(Trainer):
         for inputs in tqdm(eval_dataloader, desc="generation", disable=False):
             inputs = self._prepare_inputs(inputs)
             # print('prepared inputs are {}'.format(inputs))
-            responses = model.generate(input_ids=inputs["input_ids"], max_length=85, do_sample=True, top_k=50,
+            responses = model.generate(input_ids=inputs["input_ids"][:, :64], max_length=175, do_sample=True, top_k=50,
                                        top_p=0.95, num_return_sequences=1, early_stopping=True,
                                        pad_token_id=tokenizer.pad_token_id)
+            # responses = model.generate(input_ids=inputs["input_ids"], do_sample=True, top_k=50, top_p=0.95,
+            #                            num_return_sequences=1, early_stopping=True, pad_token_id=tokenizer.pad_token_id)
 
             # print('responses are {}'.format(responses))
             for idx, res in enumerate(responses):

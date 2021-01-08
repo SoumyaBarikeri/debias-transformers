@@ -806,7 +806,7 @@ def main():
         t_paired_test, p_paired_test = stats.ttest_rel(demo1_perp.cpu().detach().numpy(),
                                                        demo2_perp.cpu().detach().numpy())
 
-        print('***** t-val={} and p-val={} on test-set for combination of hyp {} *****'.format(t_paired, p_paired,
+        print('***** t-val={} and p-val={} on test-set for combination of hyp {} *****'.format(t_paired_test, p_paired_test,
                                                                                                best_params))
         logger.info("*** Evaluate for perplexity on Human reference set ***")
 
