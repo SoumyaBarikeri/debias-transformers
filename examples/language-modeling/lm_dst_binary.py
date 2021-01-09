@@ -162,8 +162,8 @@ class DataTrainingArguments:
 
 class DialogTurnDataset(Dataset):
     """
-    This will be superseded by a framework-agnostic approach
-    soon.
+    This class creates dataset for model input, in case of DST task, the input consists of user turn, system turn,
+    d-s-v and labels are binary
     """
 
     def __init__(self, tokenizer: PreTrainedTokenizer, file_path: str, block_size: int, data_type: str,
@@ -178,7 +178,6 @@ class DialogTurnDataset(Dataset):
         dial_data = json.load(data)
         o_data = open(onto_file_path, 'r')
         onto_data = json.load(o_data)
-        # print(onto_data)
 
         self.examples = []
 
@@ -213,9 +212,6 @@ class DialogTurnDataset(Dataset):
                             domain_slot = 'train-leave at'
 
                         val_choices = onto_data[domain_slot]
-                        # print('val choices before removal {}'.format(val_choices))
-                        # val_choices.remove(s_v_list[1])
-                        # print('val_choices {}'.format(val_choices))
                         value = random.choice(val_choices)
                         if value not in s_v_list[1]:
                             s_v = s_v_list[0] + '-' + value
@@ -262,8 +258,6 @@ class DataCollatorDST:
         # print('batch ids {}'.format(batch))
         # print('labels count distribution {}'.format(labels))
         # print('labels {}'.format(labels.bincount()))
-        # if self.tokenizer.pad_token_id is not None:
-        #     labels[labels == self.tokenizer.pad_token_id] = -100
         return {"input_ids": batch, "dst_labels": labels}
 
     def _tensorize_batch(
@@ -286,6 +280,9 @@ class DataCollatorDST:
 
 
 class TrainerDST(Trainer):
+    """
+    Child class of Trainer class, with metrics that contain accuracy and F1-score of binary classifier
+    """
 
     def prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None
@@ -462,15 +459,6 @@ class TrainerDST(Trainer):
         if prediction_loss_only:
             return (loss, None, None)
 
-        # logits = tuple(logit.detach() for logit in logits)
-        # print('logits after detach {}'.format(logits))
-
-        # if len(logits) == 1:
-        #     logits = logits[0]
-
-        # print('final logits {}'.format(logits.shape))
-        # print('labels {}'.format(labels))
-
         logits = logits.squeeze()
 
         if has_labels:
@@ -480,13 +468,13 @@ class TrainerDST(Trainer):
         else:
             labels = None
 
-        # labels_new = tuple(label for label in labels)
-        # print('final labels {}'.format(len(labels_new)))
-
         return (loss, logits, labels)
 
 
 class GPT2LMandDST(GPT2PreTrainedModel):
+    """
+    This class adds Binary classifier as transformer head
+    """
     def __init__(self, config):
         super().__init__(config)
         config.num_labels = 1

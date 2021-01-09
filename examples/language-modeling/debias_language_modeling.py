@@ -196,6 +196,9 @@ def get_dataset(
 
 
 class TrainerCustomLoss(Trainer):
+    """
+    Child class of Trainer class, with metrics that contain per sentence loss value
+    """
 
     def prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None
@@ -592,7 +595,7 @@ def main():
         if trainer.is_world_master():
             tokenizer.save_pretrained(training_args.output_dir)
 
-    # Evaluation
+    # Evaluation on validation set and test set - Perplexity difference Significance test
     results = {}
     if training_args.do_eval:
 
@@ -643,6 +646,7 @@ def main():
 
         eval_output = trainer.evaluate()
 
+        # Get model perplexity
         perplexity = math.exp(eval_output["eval_loss"])
         result = {"perplexity on 6k Human reference test": perplexity, "Significance on valid set(t-val, p-val)":
                   {"t-val": t_paired_valid, "p-val": p_paired_valid}, "Significance on test set(t-val, p-val)":

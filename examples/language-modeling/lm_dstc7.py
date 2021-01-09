@@ -162,8 +162,7 @@ class DataTrainingArguments:
 
 class ConvoDataset(Dataset):
     """
-    This will be superseded by a framework-agnostic approach
-    soon.
+    This class creates Dataset with input as context and response sequences and labels as responses.
     """
 
     def __init__(self, tokenizer: PreTrainedTokenizer, file_path: str, block_size: int, data_type: str):
@@ -396,6 +395,10 @@ class GPT2LMHeadModelCustom(GPT2LMHeadModel):
 
 
 class Dstc7Trainer(Trainer):
+    """
+    This class has some original functions of class Trainer overridden, making them compatible with DSTC7 task
+    Model takes position_ids and token_type_ids as inputs. A new response generation function is added.
+    """
 
     def compute_loss(self, model, inputs):
         outputs = model(input_ids=inputs["input_ids"], position_ids=inputs["position_ids"],
@@ -473,7 +476,8 @@ class Dstc7Trainer(Trainer):
                                        top_p=0.95, num_return_sequences=1, early_stopping=True,
                                        pad_token_id=tokenizer.pad_token_id)
             # responses = model.generate(input_ids=inputs["input_ids"], do_sample=True, top_k=50, top_p=0.95,
-            #                            num_return_sequences=1, early_stopping=True, pad_token_id=tokenizer.pad_token_id)
+            #                            num_return_sequences=1, early_stopping=True,
+            #                            pad_token_id=tokenizer.pad_token_id)
 
             # print('responses are {}'.format(responses))
             for idx, res in enumerate(responses):
@@ -549,12 +553,6 @@ def main():
 
     # Set seed
     set_seed(training_args.seed)
-
-    # Load pretrained model and tokenizer
-    #
-    # Distributed training:
-    # The .from_pretrained methods guarantee that only one local process can concurrently
-    # download model & vocab.
 
     if model_args.config_name:
         config = AutoConfig.from_pretrained(model_args.config_name, cache_dir=model_args.cache_dir)
@@ -676,6 +674,7 @@ def main():
 
         results.update(result)
 
+    # Generate responses from fine-tuned model
     trainer.generate_i(eval_dataset=eval_dataset, tokenizer=tokenizer, output_resp_file=data_args.output_resp_file)
 
     return results

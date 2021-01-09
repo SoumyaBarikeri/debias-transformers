@@ -196,7 +196,9 @@ def get_dataset(
 
 
 class TrainerGrid(Trainer):
-
+    """
+    Child class of Trainer class, with metrics that contain per sentence loss value
+    """
     def prediction_loop(
             self, dataloader: DataLoader, description: str, prediction_loss_only: Optional[bool] = None
     ) -> PredictionOutput:
@@ -442,6 +444,7 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
+    # Hyper-parameter search space
     params = {"per_device_train_batch_size": [4, 8, 16],
               "per_device_eval_batch_size": [1],
               "gradient_accumulation_steps": [1, 5, 8],
@@ -461,6 +464,7 @@ def main():
 
     sign_results = []
 
+    # Loop over each parameter combination
     for comb in grid:
 
         sign_dict = {}
@@ -582,6 +586,7 @@ def main():
                         demo_file=data_args.demo2_valid)
         )
 
+        # Initialise parameters in current combination in training_args
         for arg, value in comb.items():
             # print(arg, value)
             setattr(training_args, arg, value)
@@ -608,7 +613,7 @@ def main():
         # for n, p in model.named_parameters():
         #     print('model params {}, {}'.format(n, p))
 
-        # Initialize our Trainer
+        # Initialize Trainer
         trainer = TrainerGrid(
             model=model,
             args=training_args,
@@ -628,6 +633,7 @@ def main():
 
             trainer.train(model_path=model_path)
 
+        # Significance on validation set
         demo1_losses = trainer.evaluate(demo1_validset)
         demo2_losses = trainer.evaluate(demo2_validset)
         # print('output loss 1 {}'.format(eval_op_1))
@@ -647,6 +653,7 @@ def main():
 
         sign_results.append(sign_dict)
 
+        # Save parameter combination that gives highest p-value
         if p_paired > best_p_val:
             best_p_val = p_paired
             best_params = comb
@@ -659,6 +666,7 @@ def main():
     # Evaluation with best model
     results = {}
     if training_args.do_eval:
+        # Train the model again with best parameters
         parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -764,6 +772,7 @@ def main():
                         demo_file=data_args.demo2_test)
         )
 
+        # Set the best parameters in training_args
         for arg_name, arg_val in best_params.items():
             print(arg_name, arg_val)
             setattr(training_args, arg_name, arg_val)
@@ -802,7 +811,7 @@ def main():
         if trainer.is_world_master():
             tokenizer.save_pretrained(training_args.output_dir)
 
-        # Evaluate bias over test set
+        # Evaluate bias of best model over test set(Significance test)
         demo1_losses = trainer.evaluate(demo1_testset)
         demo2_losses = trainer.evaluate(demo2_testset)
         # print('output loss 1 {}'.format(eval_op_1))
@@ -820,6 +829,7 @@ def main():
 
         eval_output = trainer.evaluate()
 
+        # Get perplexity on Human reference set
         perplexity = math.exp(eval_output["eval_loss"])
         result = {"perplexity on 6k Human reference test": perplexity, "Significance on valid set(t-val, p-val)":
                   {"t-val": best_t_val, "p-val": best_p_val}, "Significance on test set(t-val, p-val)":
