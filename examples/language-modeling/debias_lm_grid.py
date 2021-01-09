@@ -448,6 +448,12 @@ def main():
               "lm_hyp": [0.001, 0.01],
               "debias_hyp": [10, 50, 100]}
 
+    #params = {"per_device_train_batch_size": [8],
+    #          "per_device_eval_batch_size": [1],
+    #          "gradient_accumulation_steps": [5],
+    #          "lm_hyp": [0.01],
+    #          "debias_hyp": [10]}
+
     grid = ParameterGrid(params)
     best_p_val = 0
     best_t_val = 0
@@ -653,6 +659,8 @@ def main():
     # Evaluation with best model
     results = {}
     if training_args.do_eval:
+        parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
         if data_args.eval_data_file is None and training_args.do_eval:
             raise ValueError(

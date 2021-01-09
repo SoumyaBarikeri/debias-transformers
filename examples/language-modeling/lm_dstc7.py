@@ -469,7 +469,7 @@ class Dstc7Trainer(Trainer):
         for inputs in tqdm(eval_dataloader, desc="generation", disable=False):
             inputs = self._prepare_inputs(inputs)
             # print('prepared inputs are {}'.format(inputs))
-            responses = model.generate(input_ids=inputs["input_ids"][:, :64], max_length=175, do_sample=True, top_k=50,
+            responses = model.generate(input_ids=inputs["input_ids"][:, :64], max_length=128, do_sample=True, top_k=50,
                                        top_p=0.95, num_return_sequences=1, early_stopping=True,
                                        pad_token_id=tokenizer.pad_token_id)
             # responses = model.generate(input_ids=inputs["input_ids"], do_sample=True, top_k=50, top_p=0.95,
