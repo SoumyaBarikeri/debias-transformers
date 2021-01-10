@@ -259,7 +259,7 @@ CUDA_VISIBLE_DEVICES=1 python lm_dstc7.py \
 
 ### Evaluation: 
 
-#### 1. Generate test_convos.txt like file with __UNDISCLOSED__ replaced with the model response
+#### 1. Generate test_convos.txt like file with '__UNDISCLOSED__' replaced with the model response
 
 ```python
 python evaluation/prepare_dstc7_response.py --hyp_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp.txt    --ref_file=/work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos.txt	--dest_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp_test_convos.txt
