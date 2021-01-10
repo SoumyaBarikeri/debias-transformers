@@ -31,7 +31,7 @@ Below are the commands to carry out Algorithmic level and Data level Debiasing i
 ### Algoritmic Debiasing - Equalising loss over per sentence Target pairs
 
 ```python
-CUDA_VISIBLE_DEVICES=0 python debias_lm_grid.py \
+CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
     --output_dir=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
     --model_type=gpt2 \
     --model_name_or_path=microsoft/DialoGPT-small \
@@ -56,6 +56,68 @@ CUDA_VISIBLE_DEVICES=0 python debias_lm_grid.py \
     --demographic=religion1 \
     --target_pair_type=per_sent_targets \
     --norm_debias_loss \
+    --demo1_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_valid_reduced.txt \
+    --demo2_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_valid_reduced.txt \
+    --demo1_test=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_test_reduced.txt \
+    --demo2_test=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_test_reduced.txt
+```
+### Algoritmic Debiasing - Cosine Distance equalising loss
+
+```python
+CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
+    --output_dir=/work-ceph/sbariker/models/religion1/cos_loss_grid/ \
+    --model_type=gpt2 \
+    --model_name_or_path=microsoft/DialoGPT-small \
+    --config_name=microsoft/DialoGPT-small \
+    --tokenizer_name=microsoft/DialoGPT-small \
+    --save_total_limit=2 \
+    --num_train_epochs=2.0 \
+    --do_train \
+    --evaluate_during_training \
+    --logging_steps=2000 \
+    --save_steps=2000 \
+    --train_data_file=/work-ceph/sbariker/data/text_files/religion1/religion1_bias_manual_train.txt \
+    --do_eval \
+    --eval_data_file=/work-ceph/sbariker/data/text_files/humanref6k.txt \
+    --block_size=36 \
+    --line_by_line \
+    --force_pad_token \
+    --overwrite_output_dir \
+    --debiasing_head=Cosine \
+    --debias_method=Cosine \
+    --demographic=religion1 \
+    --embedding_type=output \
+    --demo1_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_valid_reduced.txt \
+    --demo2_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_valid_reduced.txt \
+    --demo1_test=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_test_reduced.txt \
+    --demo2_test=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_test_reduced.txt 
+```
+### Algoritmic Debiasing - Projection based Hard debiasing loss
+
+```python
+CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
+    --output_dir=/work-ceph/sbariker/models/religion1/hard_de_grid/ \
+    --model_type=gpt2 \
+    --model_name_or_path=microsoft/DialoGPT-small \
+    --config_name=microsoft/DialoGPT-small \
+    --tokenizer_name=microsoft/DialoGPT-small \
+    --save_total_limit=2 \
+    --num_train_epochs=2.0 \
+    --do_train \
+    --evaluate_during_training \
+    --logging_steps=2000 \
+    --save_steps=2000 \
+    --train_data_file=/work-ceph/sbariker/data/text_files/religion1/religion1_bias_manual_train.txt \
+    --do_eval \
+    --eval_data_file=/work-ceph/sbariker/data/text_files/humanref6k.txt \
+    --block_size=36 \
+    --line_by_line \
+    --force_pad_token \
+    --overwrite_output_dir \
+    --debiasing_head=HardDe \
+    --debias_method=HardDe \
+    --demographic=religion1 \
+    --embedding_type=output \
     --demo1_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_valid_reduced.txt \
     --demo2_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_valid_reduced.txt \
     --demo1_test=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_test_reduced.txt \
