@@ -266,6 +266,8 @@ python evaluation/prepare_dstc7_response.py --hyp_file=/work-ceph/sbariker/data/
 ```
 #### 2. Evaluate generated responses using dstc.py [script](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling/blob/master/evaluation/src/dstc.py) provided by DSCT 7 team
 
+Note: Clone the DSTC 7 [repository](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling) and run the below command. Also the DSTC 7 [data] (https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling/tree/master/data_extraction) should be generated beforehand.
+
 ```python
 python dstc.py -c /work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp_test_convos.txt --refs ../../data_extraction/test.refs
 ```
