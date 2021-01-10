@@ -28,7 +28,7 @@ As part of this thesis work DialoGPT is debiased for 5 demographics - Religion1 
 
 Below are the commands to carry out Algorithmic level and Data level Debiasing in pre-trained DialoGPT model. Examples are shown only for the demographic - Religion1 (Jews-Christains). In case of any other demographic, change the demographic fileds and data files accordingly.
 
-Note: Debiasing scripts are found in the path debias_transformers/examples/language-modeling/
+Note: Debiasing scripts are found in the path debias_transformers/examples/language-modeling/. The data required all the below commands are found in https://github.com/SoumyaBarikeri/MasterThesis/tree/master/data and https://github.com/SoumyaBarikeri/MasterThesis/tree/master/text_files .
 
 ### Algoritmic level Debiasing - Equalising loss over per sentence Target pairs
 
