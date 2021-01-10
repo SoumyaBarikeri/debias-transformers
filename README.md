@@ -156,7 +156,7 @@ CUDA_VISIBLE_DEVICES=3 python run_language_modeling.py \
 #### Evaluation: Significance results on testset - 
 
 ```python
-python ../../../evaluation/measure_bias_reduced_args.py     --data_path=/work-ceph/sbariker/data/     --log_path=/work-ceph/sbariker/logs/     --get_perp=yes     --save_perp=no     --demo=religion1     --demo1=jews     --demo2=christians     --input_file_1=reddit_comments_religion1_jews_processed_phrase_biased_testset_reduced.csv     --input_file_2=reddit_comments_religion1_christians_processed_phrase_biased_testset_reduced.csv     --model_path=/work-ceph/sbariker/models/religion1/lm_loss_swapped_target/    --model_name=lm_loss_swapped_target
+python debias_transformers/evaluation/measure_bias_reduced_args.py     --data_path=/work-ceph/sbariker/data/     --log_path=/work-ceph/sbariker/logs/     --get_perp=yes     --save_perp=no     --demo=religion1     --demo1=jews     --demo2=christians     --input_file_1=reddit_comments_religion1_jews_processed_phrase_biased_testset_reduced.csv     --input_file_2=reddit_comments_religion1_christians_processed_phrase_biased_testset_reduced.csv     --model_path=/work-ceph/sbariker/models/religion1/lm_loss_swapped_target/    --model_name=lm_loss_swapped_target
 ```
 
 ### Data level debiasing - Counter Attribute Data Augmentation (CADA)
@@ -189,7 +189,7 @@ CUDA_VISIBLE_DEVICES=0 python run_language_modeling.py \
 #### Evaluation: Significance results on testset - 
 
 ```python
-python ../../../evaluation/measure_bias_reduced_args.py     --data_path=/work-ceph/sbariker/data/     --log_path=/work-ceph/sbariker/logs/     --get_perp=yes     --save_perp=no     --demo=religion1     --demo1=jews     --demo2=christians     --input_file_1=reddit_comments_religion1_jews_processed_phrase_biased_testset_neg_attr_reduced.csv     --input_file_2=reddit_comments_religion1_jews_processed_phrase_unbiased_testset_pos_attr_reduced.csv     --model_path=/work-ceph/sbariker/models/religion1/lm_loss_swapped_attr/    --model_name=lm_loss_swapped_attr
+python debias_transformers/evaluation/measure_bias_reduced_args.py     --data_path=/work-ceph/sbariker/data/     --log_path=/work-ceph/sbariker/logs/     --get_perp=yes     --save_perp=no     --demo=religion1     --demo1=jews     --demo2=christians     --input_file_1=reddit_comments_religion1_jews_processed_phrase_biased_testset_neg_attr_reduced.csv     --input_file_2=reddit_comments_religion1_jews_processed_phrase_unbiased_testset_pos_attr_reduced.csv     --model_path=/work-ceph/sbariker/models/religion1/lm_loss_swapped_attr/    --model_name=lm_loss_swapped_attr
 ```
 
 ## Quick tour - Evaluation of Debiased models on Dialog State Tracking (DST) task
@@ -262,7 +262,7 @@ CUDA_VISIBLE_DEVICES=1 python lm_dstc7.py \
 #### 1. Generate test_convos.txt like file with '\_\_UNDISCLOSED\_\_' replaced with the model response
 
 ```python
-python evaluation/prepare_dstc7_response.py --hyp_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp.txt    --ref_file=/work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos.txt	--dest_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp_test_convos.txt
+python debias_transformers/evaluation/prepare_dstc7_response.py --hyp_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp.txt    --ref_file=/work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos.txt	--dest_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp_test_convos.txt
 ```
 #### 2. Evaluate generated responses using dstc.py [script](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling/blob/master/evaluation/src/dstc.py) provided by DSCT 7 team
 
