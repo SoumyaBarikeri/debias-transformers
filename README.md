@@ -28,7 +28,9 @@ As part of this thesis work DialoGPT is debiased for 5 demographics - Religion1 
 
 Below are the commands to carry out Algorithmic level and Data level Debiasing in pre-trained DialoGPT model. Examples are shown only for the demographic - Religion1 (Jews-Christains). In case of any other demographic, change the demographic fileds and data files accordingly.
 
-### Algoritmic Debiasing - Equalising loss over per sentence Target pairs
+Note: Debiasing scripts are found in the path debias_transformers/examples/language-modeling/
+
+### Algoritmic level Debiasing - Equalising loss over per sentence Target pairs
 
 ```python
 CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
@@ -61,7 +63,7 @@ CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
     --demo1_test=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_test_reduced.txt \
     --demo2_test=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_test_reduced.txt
 ```
-### Algoritmic Debiasing - Cosine Distance equalising loss
+### Algoritmic level Debiasing - Cosine Distance equalising loss
 
 ```python
 CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
@@ -92,7 +94,7 @@ CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
     --demo1_test=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_test_reduced.txt \
     --demo2_test=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_test_reduced.txt 
 ```
-### Algoritmic Debiasing - Projection based Hard debiasing loss
+### Algoritmic level Debiasing - Projection based Hard debiasing loss
 
 ```python
 CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
@@ -122,6 +124,131 @@ CUDA_VISIBLE_DEVICES=1 python debias_lm_grid.py \
     --demo2_valid=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_valid_reduced.txt \
     --demo1_test=/work-ceph/sbariker/data/text_files/religion1/religion1_jews_biased_test_reduced.txt \
     --demo2_test=/work-ceph/sbariker/data/text_files/religion1/religion1_christians_biased_test_reduced.txt
+```
+
+### Data level debiasing - Counter Target Data Augmentation (CTDA)
+
+```python
+CUDA_VISIBLE_DEVICES=3 python run_language_modeling.py \
+    --output_dir=/work-ceph/sbariker/models/religion1/lm_loss_swapped_target/ \
+    --model_type=gpt2 \
+    --model_name_or_path=microsoft/DialoGPT-small \
+    --config_name=microsoft/DialoGPT-small \
+    --tokenizer_name=microsoft/DialoGPT-small \
+    --save_total_limit=2 \
+    --num_train_epochs=2.0 \
+    --do_train \
+    --evaluate_during_training \
+    --logging_steps=2000 \
+    --save_steps=2000 \
+    --train_data_file=/work-ceph/sbariker/data/text_files/religion1/religion1_bias_manual_swapped_targets_train.txt \
+    --do_eval \
+    --eval_data_file=/work-ceph/sbariker/data/text_files/humanref6k.txt \
+    --per_device_train_batch_size=2 \
+    --per_device_eval_batch_size=2 \
+    --block_size=36 \
+    --gradient_accumulation_steps=1 \
+    --line_by_line \
+    --force_pad_token \
+    --overwrite_output_dir
+```
+
+#### Evaluate Significance results on testset - 
+
+```python
+python ../../../evaluation/measure_bias_reduced_args.py     --data_path=/work-ceph/sbariker/data/     --log_path=/work-ceph/sbariker/logs/     --get_perp=yes     --save_perp=no     --demo=religion1     --demo1=jews     --demo2=christians     --input_file_1=reddit_comments_religion1_jews_processed_phrase_biased_testset_reduced.csv     --input_file_2=reddit_comments_religion1_christians_processed_phrase_biased_testset_reduced.csv     --model_path=/work-ceph/sbariker/models/religion1/lm_loss_swapped_target/    --model_name=lm_loss_swapped_target
+```
+
+### Data level debiasing - Counter Attribute Data Augmentation (CADA)
+
+```python
+CUDA_VISIBLE_DEVICES=0 python run_language_modeling.py \
+    --output_dir=/work-ceph/sbariker/models/religion1/lm_loss_swapped_attr/ \
+    --model_type=gpt2 \
+    --model_name_or_path=microsoft/DialoGPT-small \
+    --config_name=microsoft/DialoGPT-small \
+    --tokenizer_name=microsoft/DialoGPT-small \
+    --save_total_limit=2 \
+    --num_train_epochs=2.0 \
+    --do_train \
+    --evaluate_during_training \
+    --logging_steps=2000 \
+    --save_steps=2000 \
+    --train_data_file=/work-ceph/sbariker/data/text_files/religion1/religion1_bias_manual_swapped_attr_train.txt \
+    --do_eval \
+    --eval_data_file=/work-ceph/sbariker/data/text_files/humanref6k.txt \
+    --per_device_train_batch_size=2 \
+    --per_device_eval_batch_size=2 \
+    --block_size=36 \
+    --gradient_accumulation_steps=1 \
+    --line_by_line \
+    --force_pad_token \
+    --overwrite_output_dir
+```
+
+## Quick tour - Evaluation of Debiased models on Dialog State Tracking (DST) task
+
+Below command evaluates DialoGPT debiased on Demographic - Religion1, based on Equalising loss
+
+Note: The Script (lm_dst_binary.py) to fine-tune models on DST task is found in debias_transformers/examples/language-modeling
+
+```python
+CUDA_VISIBLE_DEVICES=0 python lm_dst_binary.py \
+    --output_dir=/work-ceph/sbariker/models/dst/rel1_eq/ \
+    --model_type=gpt2 \
+    --model_name_or_path=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
+    --config_name=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
+    --tokenizer_name=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
+    --save_total_limit=2 \
+    --num_train_epochs=1.0 \
+    --do_train \
+    --evaluate_during_training \
+    --logging_steps=10000 \
+    --save_steps=10000 \
+    --train_data_file=/work-ceph/sbariker/data/multiwoz/clean_data/train_dials.json \
+    --do_eval \
+    --eval_data_file=/work-ceph/sbariker/data/multiwoz/clean_data/test_dials.json \
+    --onto_file_path=/work-ceph/sbariker/data/multiwoz/ontology.json \
+    --per_device_train_batch_size=12 \
+    --per_device_eval_batch_size=12 \
+    --block_size=128 \
+    --gradient_accumulation_steps=4 \
+    --line_by_line \
+    --force_pad_token \
+    --overwrite_output_dir \
+    --label_names=dst_labels
+```
+
+## Quick tour - Evaluation of Debiased models on Dialog System Technology Challenge 7 (DSTC7) Response generation task
+
+Below command evaluates response generation capability of DialoGPT debiased on Demographic - Religion1, based on Equalising loss
+
+Note: The Script (lm_dstc7.py) to fine-tune models on DSTC 7 task is found in debias_transformers/examples/language-modeling
+
+```python
+CUDA_VISIBLE_DEVICES=1 python lm_dstc7.py \
+    --output_dir=/work-ceph/sbariker/models/dstc7/rel1_eq/ \
+    --model_type=gpt2 \
+    --model_name_or_path=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
+    --config_name=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
+    --tokenizer_name=/work-ceph/sbariker/models/religion1/eq_loss_grid/ \
+    --save_total_limit=2 \
+    --num_train_epochs=1 \
+    --do_train \
+    --evaluate_during_training \
+    --logging_steps=10000 \
+    --save_steps=10000 \
+    --train_data_file=/work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official/train_convos.txt \
+    --do_eval \
+    --eval_data_file=/work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos_processed.txt \
+    --per_device_train_batch_size=16 \
+    --per_device_eval_batch_size=16 \
+    --gradient_accumulation_steps=5 \
+    --line_by_line \
+    --force_pad_token \
+    --overwrite_output_dir \
+    --output_resp_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp.txt
+
 ```
 
 🤗 Transformers provides thousands of pretrained models to perform tasks on texts such as classification, information extraction, question answering, summarization, translation, text generation, etc in 100+ languages. Its aim is to make cutting-edge NLP easier to use for everyone. 
