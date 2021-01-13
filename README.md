@@ -30,6 +30,8 @@ Below are the commands to carry out Algorithmic level and Data level Debiasing i
 
 Note: Debiasing scripts are found in the path debias_transformers/examples/language-modeling/. The data required all the below commands are found in https://github.com/SoumyaBarikeri/MasterThesis/tree/master/data and https://github.com/SoumyaBarikeri/MasterThesis/tree/master/text_files .
 
+Note: The debiased models are found in dws-09 server at /work-ceph/sbariker/models/DEMOGRAPHIC_NAME/ -> Replace DEMOGRAPHIC_NAME with specific demographic like religion1, religion2, race, gender or orientation.
+
 ### Algoritmic level Debiasing - Equalising loss over per sentence Target pairs
 
 ```python
@@ -197,6 +199,7 @@ python debias_transformers/evaluation/measure_bias_reduced_args.py     --data_pa
 Below command evaluates DialoGPT debiased on Demographic - Religion1, based on Equalising loss
 
 Note: The Script (lm_dst_binary.py) to fine-tune models on DST task is found in debias_transformers/examples/language-modeling
+Note: The debiased models fine-tuned on DST are found in /work-ceph/sbariker/models/dst/ on dws-09 server
 
 ```python
 CUDA_VISIBLE_DEVICES=0 python lm_dst_binary.py \
@@ -230,6 +233,8 @@ CUDA_VISIBLE_DEVICES=0 python lm_dst_binary.py \
 Below command evaluates response generation capability of DialoGPT debiased on Demographic - Religion1, based on Equalising loss
 
 Note: The Script (lm_dstc7.py) to fine-tune models on DSTC 7 task is found in debias_transformers/examples/language-modeling. The training dataset train_convos.txt for DSTC7 can be found in dws-09 university server at /work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official/ . The test set can be found at /work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos_processed.txt .
+
+Note: The debiased models fine-tuned on DSTC7 data are found in /work-ceph/sbariker/models/dstc7/ on dws-09 server
 
 ```python
 CUDA_VISIBLE_DEVICES=1 python lm_dstc7.py \
