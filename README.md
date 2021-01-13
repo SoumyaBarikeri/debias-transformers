@@ -229,7 +229,7 @@ CUDA_VISIBLE_DEVICES=0 python lm_dst_binary.py \
 
 Below command evaluates response generation capability of DialoGPT debiased on Demographic - Religion1, based on Equalising loss
 
-Note: The Script (lm_dstc7.py) to fine-tune models on DSTC 7 task is found in debias_transformers/examples/language-modeling
+Note: The Script (lm_dstc7.py) to fine-tune models on DSTC 7 task is found in debias_transformers/examples/language-modeling. The training dataset train_convos.txt for DSTC7 can be found in dws-09 university server at /work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official/ . The test set can be found at /work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos_processed.txt .
 
 ```python
 CUDA_VISIBLE_DEVICES=1 python lm_dstc7.py \
@@ -264,7 +264,7 @@ CUDA_VISIBLE_DEVICES=1 python lm_dstc7.py \
 ```python
 python debias_transformers/evaluation/prepare_dstc7_response.py --hyp_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp.txt    --ref_file=/work-ceph/sbariker/DSTC7-End-to-End-Conversation-Modeling/data_extraction/data-official-test/test_convos.txt	--dest_file=/work-ceph/sbariker/data/eval_dsct7/rel1_eq_resp_test_convos.txt
 ```
-#### 2. Evaluate generated responses using dstc.py [script](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling/blob/master/evaluation/src/dstc.py) provided by DSCT 7 team
+#### 2. Evaluate generated responses using dstc.py [script](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling/blob/master/evaluation/src/dstc.py) provided by DSTC 7 team
 
 Note: Clone the DSTC 7 [repository](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling) and run the below command. Also the DSTC 7 [data](https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling/tree/master/data_extraction) should be generated beforehand.
 
